@@ -54,6 +54,10 @@ def _sidebar(store, demo):
             <div class="brand-name">UniSpend</div>
             <div class="muted">Quản lý chi tiêu sinh viên</div></div>''', unsafe_allow_html=True)
         today = date.today()
+        if st.session_state.pop("reset_quick_form", False):
+            st.session_state["quick_date"] = today
+            st.session_state["quick_amount"] = 45_000
+            st.session_state["quick_note"] = ""
         pending = st.session_state.pop("pending_month", None)
         if pending:
             st.session_state["report_month"] = pending
@@ -61,7 +65,7 @@ def _sidebar(store, demo):
         months = sorted(set(store.available_months() + [today.strftime("%Y-%m"), selected]), reverse=True)
         month = st.selectbox("📅 Chọn tháng xem báo cáo", months, key="report_month")
         with st.expander("Xem một tháng khác"):
-            with st.form("choose_month"):
+            with st.form("choose_month", enter_to_submit=False):
                 custom_month = st.text_input("Tháng (YYYY-MM)", value=month)
                 if st.form_submit_button("Xem tháng", width="stretch"):
                     try:
@@ -74,19 +78,23 @@ def _sidebar(store, demo):
         kind_label = st.radio("Loại giao dịch", ["Chi tiêu", "Thu nhập"], horizontal=True, key="quick_kind")
         kind = "expense" if kind_label == "Chi tiêu" else "income"
         categories = EXPENSE_CATEGORIES if kind == "expense" else INCOME_CATEGORIES
-        with st.form(f"quick_add_{kind}", clear_on_submit=True):
+        st.session_state.setdefault("quick_amount", 45_000)
+        with st.container(border=True):
             category = st.selectbox("Danh mục", categories, format_func=_category_label, key=f"quick_category_{kind}")
-            transaction_date = st.date_input("Ngày giao dịch", value=today, min_value=date.min, max_value=date.max)
-            amount = st.number_input("Số tiền (VNĐ)", min_value=0, max_value=MAX_AMOUNT, value=45_000,
-                                     step=5_000, format="%d", key=f"quick_amount_{kind}")
-            note = st.text_input("Ghi chú chi tiết", max_chars=200, placeholder="VD: Cơm trưa, đổ xăng, tiền trọ…")
-            if st.form_submit_button("💾 Lưu giao dịch", type="primary", width="stretch"):
+            transaction_date = st.date_input("Ngày giao dịch", min_value=date.min, max_value=date.max,
+                                             key="quick_date")
+            amount = st.number_input("Số tiền (VNĐ)", min_value=0, max_value=MAX_AMOUNT,
+                                     step=5_000, format="%d", key="quick_amount")
+            note = st.text_input("Ghi chú chi tiết", max_chars=200, placeholder="VD: Cơm trưa, đổ xăng, tiền trọ…",
+                                 key="quick_note")
+            if st.button("💾 Lưu giao dịch", type="primary", width="stretch"):
                 try:
                     store.add_transaction(transaction_date.isoformat(), kind, category, amount, note)
                 except (ValueError, sqlite3.Error) as exc:
                     st.error(f"Không lưu được giao dịch: {exc}")
                 else:
                     st.session_state["pending_month"] = transaction_date.strftime("%Y-%m")
+                    st.session_state["reset_quick_form"] = True
                     _notice("Đã lưu giao dịch thành công.")
         st.divider()
         if demo:
@@ -221,7 +229,7 @@ def _budgets(store, month, statuses, budgets):
         with st.container(border=True):
             st.markdown("#### ⚙️ Điều chỉnh định mức")
             st.caption("Từ 80%: cảnh báo vàng. Vượt 100%: báo động đỏ. Nhập 0 để bỏ hạn mức.")
-            with st.form(f"budget_{month}"):
+            with st.form(f"budget_{month}", enter_to_submit=False):
                 amounts = {}
                 for category in (TOTAL_BUDGET_CATEGORY, *EXPENSE_CATEGORIES):
                     title = "🎯 Tổng ngân sách tháng (VNĐ)" if category == TOTAL_BUDGET_CATEGORY else f"{_category_label(category)} (VNĐ)"
@@ -261,7 +269,7 @@ def _edit_transaction(store, records):
                     index=0 if record.kind == "expense" else 1,
                     format_func=TYPE_LABELS.get, horizontal=True, key=f"edit_kind_{record.id}")
     categories = EXPENSE_CATEGORIES if kind == "expense" else INCOME_CATEGORIES
-    with st.form(f"edit_{record.id}_{kind}"):
+    with st.form(f"edit_{record.id}_{kind}", enter_to_submit=False):
         transaction_date = st.date_input("Ngày", value=date.fromisoformat(record.date), min_value=date.min, max_value=date.max)
         category = st.selectbox("Danh mục mới", categories,
                                index=categories.index(record.category) if record.category in categories else 0,
@@ -314,7 +322,7 @@ def _ledger(store, month):
         indexed = {record.id: record for record in records}
         selected_id = st.selectbox("Giao dịch cần xóa", list(indexed), key="delete_transaction_id",
                                    format_func=lambda value: f"#{value} · {indexed[value].date} · {indexed[value].category} · {money(indexed[value].amount)}")
-        with st.form(f"delete_{selected_id}"):
+        with st.form(f"delete_{selected_id}", enter_to_submit=False):
             confirmed = st.checkbox(f"Tôi xác nhận xóa giao dịch #{selected_id}.")
             if st.form_submit_button("Xóa giao dịch", width="stretch"):
                 if not confirmed:

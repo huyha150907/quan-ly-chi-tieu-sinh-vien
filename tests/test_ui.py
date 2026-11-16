@@ -71,12 +71,14 @@ class ExpenseUiTests(unittest.TestCase):
         ])
         self.assertEqual(self.records(), [])
 
-        app.number_input(key="quick_amount_expense").set_value(0)
+        app.number_input(key="quick_amount").set_value(0)
+        app.text_input(key="quick_note").set_value("Giữ ghi chú khi nhập sai")
         self.click("💾 Lưu giao dịch")
         self.assertTrue(any("Không lưu được giao dịch" in error.value for error in app.error))
         self.assertEqual(self.records(), [])
+        self.assertEqual(app.text_input(key="quick_note").value, "Giữ ghi chú khi nhập sai")
 
-        app.number_input(key="quick_amount_expense").set_value(65_000)
+        app.number_input(key="quick_amount").set_value(65_000)
         self.widget(app.sidebar.text_input, "Ghi chú chi tiết").set_value("Cơm và nước")
         self.click("💾 Lưu giao dịch")
         record, = self.records()
@@ -84,6 +86,21 @@ class ExpenseUiTests(unittest.TestCase):
                          ("expense", "Ăn uống", 65_000, "Cơm và nước"))
         self.assertEqual(record.date, self.today.isoformat())
         self.assertTrue(any("Đã lưu giao dịch" in notice.value for notice in app.success))
+        self.assertEqual(app.text_input(key="quick_note").value, "")
+
+    def test_changing_type_preserves_draft_and_saves_without_enter(self):
+        app = self.open_app()
+        app.number_input(key="quick_amount").set_value(200_000)
+        app.text_input(key="quick_note").set_value("Lương ca tối")
+        app.radio(key="quick_kind").set_value("Thu nhập").run()
+        self.assert_no_exception()
+        self.assertEqual(app.number_input(key="quick_amount").value, 200_000)
+        self.assertEqual(app.text_input(key="quick_note").value, "Lương ca tối")
+        app.selectbox(key="quick_category_income").select("Làm thêm")
+        self.click("💾 Lưu giao dịch")
+        record, = self.records()
+        self.assertEqual((record.kind, record.category, record.amount, record.note),
+                         ("income", "Làm thêm", 200_000, "Lương ca tối"))
 
     def test_edit_validates_amount_and_can_change_transaction_type(self):
         record_id = self.seed()

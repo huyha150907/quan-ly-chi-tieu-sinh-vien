@@ -18,4 +18,6 @@ python -m venv .venv
 
 Giao diện mở trên trình duyệt. Giữ Terminal mở khi dùng ứng dụng; nhấn **Ctrl+C** để dừng.
 
+Nhập thông tin rồi bấm **Lưu giao dịch**, không cần nhấn Enter. Các nút mệnh giá nhanh giữ nguyên ghi chú đang nhập; khi dữ liệu chưa hợp lệ, biểu mẫu giữ nội dung để bạn sửa.
+
 Dữ liệu được tự khởi tạo với mẫu bốn tháng gần nhất trong `unispend_3d/data/student_expense.db`. Đây là tệp dữ liệu riêng; không dùng hoặc chuyển cơ sở dữ liệu của giao diện ở thư mục gốc. Gói mã nguồn không kèm dữ liệu hay cache từ máy đang chạy.

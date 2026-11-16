@@ -9,6 +9,7 @@ và liên kết trực tiếp với `backend.py` (ExpenseBackend) bên trong IDE
 """
 
 from datetime import date
+from pathlib import Path
 import pandas as pd
 import altair as alt
 import streamlit as st
@@ -540,6 +541,10 @@ def inject_3d_styles_and_scripts():
     </style>
     """, unsafe_allow_html=True)
 
+    theme_path = Path(__file__).with_name("theme.css")
+    if theme_path.is_file():
+        st.html(f"<style>{theme_path.read_text(encoding='utf-8')}</style>")
+
     # Nhúng JavaScript Engine gắn sự kiện di chuột 3D Tilt + Glare Spotlight cho tất cả thẻ 3D
     components.html("""
     <script>
@@ -616,6 +621,13 @@ inject_3d_styles_and_scripts()
 # =============================================================================
 if "quick_amount" not in st.session_state:
     st.session_state.quick_amount = 45_000
+if st.session_state.pop("quick_clear_note", False):
+    st.session_state["quick_note"] = ""
+
+
+def set_quick_amount(amount):
+    """Đổi số tiền trước lượt hiển thị, giữ nguyên nội dung đang nhập."""
+    st.session_state["quick_amount"] = amount
 
 with st.sidebar:
     st.markdown("""
@@ -627,10 +639,16 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
     available_months = backend.get_available_months()
+    saved_month = st.session_state.pop("report_month_after_save", None)
+    if saved_month in available_months:
+        st.session_state["report_month"] = saved_month
+    elif st.session_state.get("report_month") not in available_months:
+        st.session_state["report_month"] = available_months[0]
     selected_month = st.selectbox(
         "📅 Chọn tháng xem báo cáo:",
         options=available_months,
         index=0,
+        key="report_month",
         help="Chọn tháng để Backend tính toán thống kê Tiền ăn, Tiền trọ, Đi lại và cảnh báo ngân sách."
     )
 
@@ -648,59 +666,71 @@ with st.sidebar:
     st.caption("💡 Bấm chọn nhanh mệnh giá phổ biến:")
     q_col1, q_col2, q_col3 = st.columns(3)
     with q_col1:
-        if st.button("35k 🍜", use_container_width=True, help="Cơm trưa / Phở sáng"):
-            st.session_state.quick_amount = 35_000
+        st.button("35k 🍜", use_container_width=True, help="Cơm trưa / Phở sáng",
+                  key="quick_35000", on_click=set_quick_amount, args=(35_000,))
     with q_col2:
-        if st.button("50k 🛵", use_container_width=True, help="Đổ xăng / Trà sữa"):
-            st.session_state.quick_amount = 50_000
+        st.button("50k 🛵", use_container_width=True, help="Đổ xăng / Trà sữa",
+                  key="quick_50000", on_click=set_quick_amount, args=(50_000,))
     with q_col3:
-        if st.button("200k 🛒", use_container_width=True, help="Đi siêu thị / Mua sách"):
-            st.session_state.quick_amount = 200_000
+        st.button("200k 🛒", use_container_width=True, help="Đi siêu thị / Mua sách",
+                  key="quick_200000", on_click=set_quick_amount, args=(200_000,))
 
     cat_dict = backend.get_categories(tx_type_quick)
     cat_options = list(cat_dict.keys())
 
-    with st.form("quick_add_tx_form", clear_on_submit=True):
+    category_key = "quick_category_expense" if tx_type_quick == "Chi tiêu" else "quick_category_income"
+    # Không trì hoãn dữ liệu trong form: đổi loại hoặc bấm mệnh giá vẫn giữ bản nháp.
+    with st.container(border=True):
         selected_cat = st.selectbox(
             "Danh mục:",
             options=cat_options,
-            format_func=lambda c: f"{cat_dict[c]['icon']} {c}"
+            format_func=lambda c: f"{cat_dict[c]['icon']} {c}",
+            key=category_key,
         )
-        tx_date = st.date_input("Ngày giao dịch:", value=date.today())
+        tx_date = st.date_input("Ngày giao dịch:", value=date.today(), key="quick_date")
         tx_amount = st.number_input(
             "Số tiền (VNĐ):",
             min_value=0,
             max_value=500_000_000,
-            value=int(st.session_state.quick_amount),
             step=5_000,
+            format="%d",
+            key="quick_amount",
             help="Nhập số tiền lớn hơn 0 VNĐ"
         )
         tx_note = st.text_input(
             "Ghi chú chi tiết:",
-            placeholder="VD: Cơm trưa căn tin, Đổ xăng, Tiền trọ..."
+            placeholder="VD: Cơm trưa căn tin, Đổ xăng, Tiền trọ...",
+            key="quick_note",
+            max_chars=200,
         )
 
-        submitted = st.form_submit_button("💾 Lưu Giao Dịch Ngay", use_container_width=True, type="primary")
+        submitted = st.button("💾 Lưu Giao Dịch Ngay", use_container_width=True, type="primary", key="quick_save")
         if submitted:
             ok, message = backend.add_daily_transaction(
-                date_str=tx_date.strftime("%Y-%m-%d"),
+                date_str=tx_date.isoformat(),
                 tx_type=tx_type_quick,
                 category=selected_cat,
                 amount=float(tx_amount),
                 note=tx_note
             )
             if ok:
-                st.toast(f"✅ {message}", icon="🎉")
-                st.success(f"✅ {message}")
+                st.session_state["report_month_after_save"] = tx_date.isoformat()[:7]
+                st.session_state["quick_clear_note"] = True
+                st.session_state["quick_saved_notice"] = message
                 st.rerun()
             else:
                 st.error(f"⚠️ {message}")
+
+    saved_notice = st.session_state.pop("quick_saved_notice", None)
+    if saved_notice:
+        st.success(f"✅ {saved_notice}")
 
     st.markdown("---")
     with st.expander("🛠️ Công cụ Demo & Kiểm thử"):
         st.caption("Khôi phục dữ liệu mẫu 4 tháng để thuyết trình Bài tập lớn:")
         if st.button("🔄 Nạp lại dữ liệu mẫu", use_container_width=True):
             backend.reset_demo_data()
+            st.session_state["report_month_after_save"] = date.today().strftime("%Y-%m")
             st.toast("Đã nạp lại bộ dữ liệu mẫu thành công!", icon="🎉")
             st.rerun()
 
@@ -1135,25 +1165,26 @@ with tab_simulator:
 
     sim_col1, sim_col2 = st.columns([1.15, 1])
     with sim_col1:
+        food_spent, rent_spent, move_spent = (int(item["spent"]) for item in essential_stats[:3])
         sim_food = st.slider(
             "🍜 Giả lập Tiền ăn trong tháng (VNĐ):",
-            min_value=500_000,
-            max_value=5_000_000,
-            value=int(essential_stats[0]["spent"]) if essential_stats[0]["spent"] > 0 else 2_000_000,
+            min_value=0,
+            max_value=max(5_000_000, food_spent),
+            value=food_spent,
             step=50_000
         )
         sim_rent = st.slider(
             "🏠 Giả lập Tiền trọ + Điện nước (VNĐ):",
-            min_value=500_000,
-            max_value=5_000_000,
-            value=int(essential_stats[1]["spent"]) if essential_stats[1]["spent"] > 0 else 1_850_000,
+            min_value=0,
+            max_value=max(5_000_000, rent_spent),
+            value=rent_spent,
             step=50_000
         )
         sim_move = st.slider(
             "🛵 Giả lập Tiền đi lại + Xăng xe (VNĐ):",
-            min_value=100_000,
-            max_value=2_000_000,
-            value=int(essential_stats[2]["spent"]) if essential_stats[2]["spent"] > 0 else 450_000,
+            min_value=0,
+            max_value=max(2_000_000, move_spent),
+            value=move_spent,
             step=25_000
         )
 
@@ -1248,13 +1279,14 @@ with tab_simulator:
         st.markdown(f"#### ⚙️ Điều chỉnh Định mức Ngân sách ({selected_month})")
         st.caption("Khi đạt 80% định mức: Cảnh báo vàng. Khi vượt 100% định mức: Báo động đỏ.")
 
-        with st.form("budget_settings_form"):
+        with st.form(f"budget_settings_form_{selected_month}", enter_to_submit=False):
             new_total_budget = st.number_input(
                 "🎯 Tổng ngân sách chi tiêu tối đa trong tháng (VNĐ):",
                 min_value=500_000,
                 max_value=100_000_000,
                 value=int(budget_cfg.total_budget),
-                step=100_000
+                step=100_000,
+                key=f"total_budget_{selected_month}",
             )
             st.markdown("**Định mức riêng cho từng hạng mục:**")
             new_limits = {}
@@ -1291,12 +1323,12 @@ with tab_ledger:
 
     f_col1, f_col2, f_col3, f_col4 = st.columns([1.2, 1.4, 1.8, 1])
     with f_col1:
-        filter_type = st.selectbox("Lọc theo loại:", ["Tất cả", "Chi tiêu", "Thu nhập"])
+        filter_type = st.selectbox("Lọc theo loại:", ["Tất cả", "Chi tiêu", "Thu nhập"], key="ledger_type")
     with f_col2:
         all_cats_in_month = ["Tất cả"] + sorted(df_month["category"].unique().tolist()) if not df_month.empty else ["Tất cả"]
         filter_cat = st.selectbox("Lọc theo danh mục:", all_cats_in_month)
     with f_col3:
-        search_kw = st.text_input("🔍 Tìm theo ghi chú:", placeholder="Nhập từ khóa (VD: xăng, cơm, trọ...)")
+        search_kw = st.text_input("🔍 Tìm theo ghi chú:", placeholder="Nhập từ khóa (VD: xăng, cơm, trọ...)", key="ledger_search")
     with f_col4:
         st.write("")
         if not df_month.empty:
@@ -1315,7 +1347,7 @@ with tab_ledger:
     if filter_cat != "Tất cả":
         df_filtered = df_filtered[df_filtered["category"] == filter_cat]
     if search_kw.strip():
-        df_filtered = df_filtered[df_filtered["note"].str.contains(search_kw.strip(), case=False, na=False)]
+        df_filtered = df_filtered[df_filtered["note"].str.contains(search_kw.strip(), case=False, na=False, regex=False)]
 
     if not df_filtered.empty:
         st.dataframe(
