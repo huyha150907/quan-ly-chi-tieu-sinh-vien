@@ -1,570 +1,371 @@
-"""Giao diện Tkinter cho ứng dụng quản lý chi tiêu sinh viên."""
+"""Giao diện web UniSpend, sử dụng dữ liệu SQLite hiện có của ứng dụng."""
 
+from __future__ import annotations
+
+import csv
+import io
 import sqlite3
-import tkinter as tk
 from datetime import date
-from tkinter import filedialog, messagebox, ttk
+from html import escape
+from pathlib import Path
 
-from .charts import CategoryChart, MonthlyChart
-from .storage import EXPENSE_CATEGORIES, INCOME_CATEGORIES, TYPE_LABELS
-from .utils import display_date, money, parse_amount, shift_month, validate_month
+import pandas as pd
+import streamlit as st
 
-BG = "#F3F6F3"
-WHITE = "#FFFFFF"
-INK = "#18342F"
-MUTED = "#72817A"
-GREEN = "#137C63"
-RED = "#BC4D47"
-LINE = "#E0E8E1"
-TOTAL = "Tổng chi tiêu"
+from . import charts
+from .storage import (
+    EXPENSE_CATEGORIES, INCOME_CATEGORIES, MAX_AMOUNT,
+    TOTAL_BUDGET_CATEGORY, TYPE_LABELS, ExpenseStore,
+)
+from .utils import money, validate_month
 
 
-def label(parent, text, size=10, color=INK, bold=False, bg=None, **kwargs):
-    return tk.Label(parent, text=text, font=("Segoe UI", size, "bold" if bold else "normal"),
-                    fg=color, bg=bg or parent.cget("bg"), **kwargs)
+CATEGORY_META = {
+    "Ăn uống": ("🍜", "Tiền ăn", "#EF4444", "Ăn uống hằng ngày, thực phẩm và đồ uống"),
+    "Tiền trọ": ("🏠", "Tiền trọ", "#0D9488", "Tiền phòng, điện nước và sinh hoạt"),
+    "Đi lại": ("🛵", "Đi lại", "#2563EB", "Xăng xe, vé xe buýt và di chuyển"),
+    "Học tập": ("📚", "Học tập", "#8B5CF6", ""),
+    "Giải trí": ("🎮", "Giải trí", "#F59E0B", ""),
+    "Khác": ("📦", "Khác", "#64748B", ""),
+}
 
 
-def button(parent, text, command, primary=False, danger=False, **kwargs):
-    return tk.Button(parent, text=text, command=command, relief="flat", bd=0,
-                     bg=GREEN if primary else ("#FCECE9" if danger else "#E7EEE8"),
-                     fg=WHITE if primary else (RED if danger else INK),
-                     activebackground="#D4E7DB", activeforeground=INK,
-                     font=("Segoe UI", 10, "bold"), padx=16, pady=9,
-                     cursor="hand2", **kwargs)
+def _category_label(category):
+    icon, title, *_ = CATEGORY_META.get(category, ("💰", category))
+    return f"{icon} {title}"
 
 
-class ExpenseApp(tk.Tk):
-    def __init__(self, store, demo=False):
-        super().__init__()
-        self.store = store
-        self.demo = demo
-        self.month = date.today().strftime("%Y-%m")
-        self.view = "Tổng quan"
-        self.title("Ví sinh viên - Quản lý chi tiêu" + (" [DỮ LIỆU MẪU]" if demo else ""))
-        width = min(1280, self.winfo_screenwidth() - 50)
-        height = min(850, self.winfo_screenheight() - 80)
-        self.geometry(f"{width}x{height}")
-        self.minsize(1040, 720)
-        self.configure(bg=BG)
-        self.option_add("*Font", ("Segoe UI", 10))
-        self._setup_style()
-        self._build_shell()
-        self.bind("<Control-n>", lambda _event: self.open_transaction())
-        self.bind("<Control-N>", lambda _event: self.open_transaction())
-        self.bind_all("<MouseWheel>", self._scroll_page, add="+")
-        self.protocol("WM_DELETE_WINDOW", self.destroy)
-        self.show_view(self.view)
+def _notice(message):
+    st.session_state["notice"] = message
+    st.rerun()
 
-    def _setup_style(self):
-        style = ttk.Style(self)
-        style.theme_use("clam")
-        style.configure("Treeview", background=WHITE, fieldbackground=WHITE, foreground=INK,
-                        rowheight=36, borderwidth=0, font=("Segoe UI", 10))
-        style.configure("Treeview.Heading", background="#EDF3EE", foreground=MUTED,
-                        font=("Segoe UI", 9, "bold"), padding=(8, 10), relief="flat")
-        style.map("Treeview", background=[("selected", "#DCEFE5")],
-                  foreground=[("selected", INK)])
-        style.configure("TCombobox", padding=7, fieldbackground=WHITE)
-        style.configure("TEntry", padding=7, fieldbackground=WHITE)
 
-    def _build_shell(self):
-        sidebar = tk.Frame(self, bg=INK, width=205)
-        sidebar.pack(side="left", fill="y")
-        sidebar.pack_propagate(False)
-        label(sidebar, "VÍ SINH VIÊN", 17, WHITE, True).pack(anchor="w", padx=23, pady=(32, 4))
-        label(sidebar, "Chi tiêu nhỏ, kế hoạch lớn", 9, "#A8C7BA").pack(anchor="w", padx=23)
-        label(sidebar, "KHÔNG GIAN CỦA BẠN", 8, "#8BA99D", True).pack(anchor="w", padx=23, pady=(42, 12))
-        self.nav_buttons = {}
-        for title in ("Tổng quan", "Giao dịch", "Ngân sách", "Thống kê"):
-            b = tk.Button(sidebar, text=title, anchor="w", relief="flat", bd=0,
-                          font=("Segoe UI", 11), fg="#BCD1C6", bg=INK,
-                          activebackground="#294B40", activeforeground=WHITE,
-                          padx=23, pady=15, cursor="hand2",
-                          command=lambda t=title: self.show_view(t))
-            b.pack(fill="x", padx=10, pady=3)
-            self.nav_buttons[title] = b
-        bottom = tk.Frame(sidebar, bg=INK)
-        bottom.pack(side="bottom", fill="x", padx=23, pady=25)
-        label(bottom, "DỮ LIỆU MẪU" if self.demo else "DỮ LIỆU CÁ NHÂN",
-              9, "#B8D9A0", True).pack(anchor="w")
-        label(bottom, "Lưu trên máy của bạn\nPython + SQLite", 9, "#95B0A2",
-              justify="left").pack(anchor="w", pady=(8, 0))
+def _status_text(status):
+    if status.exceeded:
+        return "danger", "Vượt ngân sách", f"Vượt định mức {money(-status.remaining)}"
+    if status.near_limit:
+        return "warning", "Sắp chạm ngưỡng", f"Đã dùng {status.ratio:.1%} định mức"
+    return "safe", "Trong định mức", f"Còn có thể chi {money(status.remaining)}"
 
-        main = tk.Frame(self, bg=BG)
-        main.pack(side="left", fill="both", expand=True, padx=26, pady=23)
-        head = tk.Frame(main, bg=BG)
-        head.pack(fill="x")
-        title_block = tk.Frame(head, bg=BG)
-        title_block.pack(side="left")
-        self.heading = label(title_block, "", 24, bold=True)
-        self.heading.pack(anchor="w")
-        self.subtitle = label(title_block, "", 10, MUTED)
-        self.subtitle.pack(anchor="w", pady=(3, 0))
-        button(head, "+ Thêm giao dịch", self.open_transaction, primary=True).pack(side="right", pady=5)
 
-        month_row = tk.Frame(main, bg=BG)
-        month_row.pack(fill="x", pady=(20, 16))
-        tk.Button(month_row, text="‹", command=lambda: self.change_month(-1),
-                  bg=WHITE, fg=INK, relief="flat", font=("Segoe UI", 15), width=3).pack(side="left")
-        self.month_var = tk.StringVar(value=self.month)
-        month_entry = ttk.Entry(month_row, textvariable=self.month_var, width=10, justify="center")
-        month_entry.pack(side="left", padx=6)
-        month_entry.bind("<Return>", lambda _event: self.apply_month())
-        tk.Button(month_row, text="›", command=lambda: self.change_month(1),
-                  bg=WHITE, fg=INK, relief="flat", font=("Segoe UI", 15), width=3).pack(side="left")
-        button(month_row, "Xem tháng", self.apply_month).pack(side="left", padx=8)
-        button(month_row, "Tháng này", self.current_month).pack(side="left")
-        label(month_row, "Đơn vị: đồng (VND)", 9, MUTED).pack(side="right")
-        self.status_var = tk.StringVar(value="Sẵn sàng. Ctrl+N để thêm giao dịch.")
-        tk.Label(main, textvariable=self.status_var, bg=BG, fg=MUTED,
-                 font=("Segoe UI", 9), anchor="w").pack(side="bottom", fill="x", pady=(12, 0))
-        self.content_host = tk.Frame(main, bg=BG)
-        self.content_host.pack(fill="both", expand=True)
-        self.content = self.content_host
-
-    def show_view(self, view):
-        self.view = view
-        for widget in self.content_host.winfo_children():
-            widget.destroy()
-        self.content = self.content_host
-        self.page_canvas = None
-        # Các trang báo cáo có thể cuộn trên màn hình nhỏ; bảng giao dịch tự cuộn.
-        if view in ("Tổng quan", "Thống kê"):
-            self.page_canvas = tk.Canvas(self.content_host, bg=BG, highlightthickness=0)
-            scrollbar = ttk.Scrollbar(self.content_host, orient="vertical", command=self.page_canvas.yview)
-            scrollbar.pack(side="right", fill="y")
-            self.page_canvas.configure(yscrollcommand=scrollbar.set)
-            self.page_canvas.pack(side="left", fill="both", expand=True)
-            self.content = tk.Frame(self.page_canvas, bg=BG)
-            item = self.page_canvas.create_window(0, 0, window=self.content, anchor="nw")
-            self.content.bind("<Configure>", lambda _e: self.page_canvas.configure(
-                scrollregion=self.page_canvas.bbox("all")))
-            self.page_canvas.bind("<Configure>", lambda e: self.page_canvas.itemconfigure(item, width=e.width))
-        for name, b in self.nav_buttons.items():
-            b.configure(bg="#31584A" if name == view else INK,
-                        fg=WHITE if name == view else "#BCD1C6")
-        subtitles = {
-            "Tổng quan": "Nắm rõ từng khoản thu chi, chủ động hơn mỗi ngày.",
-            "Giao dịch": "Ghi lại và tìm kiếm các khoản thu chi của bạn.",
-            "Ngân sách": "Đặt giới hạn cho tháng và từng nhóm chi tiêu.",
-            "Thống kê": "Hiểu tiền của bạn đang đi đâu qua từng tháng.",
-        }
-        self.heading.configure(text=view)
-        self.subtitle.configure(text=subtitles[view])
-        {"Tổng quan": self._dashboard, "Giao dịch": self._transactions,
-         "Ngân sách": self._budgets, "Thống kê": self._statistics}[view]()
-
-    def _scroll_page(self, event):
-        if self.page_canvas is not None and self.grab_current() is None:
-            if self.page_canvas.bbox("all")[3] > self.page_canvas.winfo_height():
-                self.page_canvas.yview_scroll(-int(event.delta / 120), "units")
-
-    def apply_month(self):
-        try:
-            self.month = validate_month(self.month_var.get().strip())
-        except ValueError as exc:
-            messagebox.showerror("Tháng không hợp lệ", str(exc), parent=self)
-            self.month_var.set(self.month)
-            return
-        self.month_var.set(self.month)
-        self.show_view(self.view)
-
-    def change_month(self, offset):
-        try:
-            self.month = shift_month(self.month, offset)
-        except ValueError as exc:
-            messagebox.showerror("Không thể chuyển tháng", str(exc), parent=self)
-            return
-        self.month_var.set(self.month)
-        self.show_view(self.view)
-
-    def current_month(self):
-        self.month_var.set(date.today().strftime("%Y-%m"))
-        self.apply_month()
-
-    def _panel(self, parent, title, subtitle=None):
-        frame = tk.Frame(parent, bg=WHITE, highlightbackground=LINE, highlightthickness=1)
-        label(frame, title, 12, bold=True).pack(anchor="w", padx=18, pady=(15, 0))
-        if subtitle:
-            label(frame, subtitle, 9, MUTED).pack(anchor="w", padx=18, pady=(3, 0))
-        return frame
-
-    def _metrics(self, parent):
-        summary = self.store.summary(self.month)
-        row = tk.Frame(parent, bg=BG)
-        row.pack(fill="x", pady=(0, 16))
-        data = (("TỔNG THU NHẬP", summary["income"], GREEN, "Trong tháng đang chọn"),
-                ("TỔNG CHI TIÊU", summary["expense"], RED, f"{summary['count']} giao dịch thu và chi"),
-                ("CHÊNH LỆCH THU CHI", summary["balance"], INK, "Thu nhập trừ chi tiêu trong tháng"))
-        for i, (title, value, color, hint) in enumerate(data):
-            row.columnconfigure(i, weight=1, uniform="cards")
-            card = tk.Frame(row, bg=WHITE, highlightbackground=LINE, highlightthickness=1)
-            card.grid(row=0, column=i, sticky="nsew", padx=(0 if i == 0 else 6, 0 if i == 2 else 6))
-            label(card, title, 9, MUTED, True).pack(anchor="w", padx=17, pady=(14, 4))
-            label(card, money(value), 22, color, True).pack(anchor="w", padx=17)
-            label(card, hint, 9, MUTED).pack(anchor="w", padx=17, pady=(3, 14))
-
-    def _budget_banner(self, parent):
-        statuses = self.store.budget_statuses(self.month)
-        exceeded = [s for s in statuses if s.exceeded]
-        near = [s for s in statuses if s.near_limit and not s.exceeded]
-        if exceeded:
-            text = "Vượt ngân sách: " + "; ".join(f"{s.category} +{money(-s.remaining)}" for s in exceeded)
-            bg, color = "#FCEDEA", RED
-        elif near:
-            text = "Sắp hết ngân sách: " + "; ".join(f"{s.category} ({s.ratio:.0%})" for s in near)
-            bg, color = "#FFF3DB", "#93631C"
-        elif statuses:
-            text = "Bạn đang chi tiêu trong ngân sách. Tiếp tục giữ thói quen ghi chép nhé."
-            bg, color = "#E4F1E8", GREEN
-        else:
-            text = "Chưa đặt ngân sách tháng này. Vào mục Ngân sách để bật cảnh báo."
-            bg, color = "#E8EFEA", MUTED
-        label(parent, text, 10, color, bg=bg, anchor="w", wraplength=850,
-              justify="left", padx=14, pady=11).pack(fill="x", pady=(0, 16))
-
-    def _chart_pair(self, parent, height=210):
-        row = tk.Frame(parent, bg=BG)
-        row.pack(fill="both", expand=True, pady=(0, 16))
-        row.columnconfigure(0, weight=1, uniform="charts")
-        row.columnconfigure(1, weight=1, uniform="charts")
-        row.rowconfigure(0, weight=1)
-        categories = self._panel(row, "Chi tiêu theo danh mục", f"Tháng {self.month[5:]}/{self.month[:4]}")
-        categories.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
-        CategoryChart(categories, self.store.category_totals(self.month), height=height).pack(
-            fill="both", expand=True, padx=18, pady=14)
-        months = self._panel(row, "Thu chi qua các tháng", "6 tháng gần nhất đến tháng đang chọn")
-        months.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
-        year, month = map(int, self.month.split("-"))
-        count = min(6, (year - 1) * 12 + month)
-        MonthlyChart(months, self.store.monthly_totals(self.month, count=count), height=height).pack(
-            fill="both", expand=True, padx=14, pady=14)
-
-    def _dashboard(self):
-        self._metrics(self.content)
-        self._budget_banner(self.content)
-        self._chart_pair(self.content, 185)
-        panel = self._panel(self.content, "Giao dịch gần đây", "Trong tháng đang chọn")
-        panel.pack(fill="both", expand=True)
-        records = self.store.list_transactions(month=self.month)[:5]
-        self._make_table(panel, records, height=4, editable=False)
-        if not records:
-            label(panel, "Chưa có giao dịch. Chọn + Thêm giao dịch để bắt đầu.", 10, MUTED).pack(pady=(0, 14))
-
-    def _make_table(self, parent, records, height=8, editable=True):
-        wrapper = tk.Frame(parent, bg=WHITE)
-        wrapper.pack(fill="both", expand=True, padx=14, pady=12)
-        columns = ("date", "kind", "category", "note", "amount")
-        table = ttk.Treeview(wrapper, columns=columns, show="headings", height=height,
-                             selectmode="browse")
-        for column, title, width, anchor in (
-            ("date", "NGÀY", 95, "w"), ("kind", "LOẠI", 95, "w"),
-            ("category", "DANH MỤC", 135, "w"), ("note", "GHI CHÚ", 215, "w"),
-            ("amount", "SỐ TIỀN", 135, "e")):
-            table.heading(column, text=title, anchor=anchor)
-            table.column(column, width=width, minwidth=65, anchor=anchor,
-                         stretch=column in ("note", "category"))
-        scrollbar = ttk.Scrollbar(wrapper, orient="vertical", command=table.yview)
-        table.configure(yscrollcommand=scrollbar.set)
-        table.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-        table.tag_configure("income", foreground=GREEN)
-        table.tag_configure("expense", foreground=INK)
-        for record in records:
-            sign = "+" if record.kind == "income" else "−"
-            table.insert("", "end", iid=str(record.id), tags=(record.kind,), values=(
-                display_date(record.date), TYPE_LABELS[record.kind], record.category,
-                record.note or "—", f"{sign}{money(record.amount)}"))
-        if editable:
-            table.bind("<Double-1>", lambda _event: self.edit_selected())
-        return table
-
-    def _transactions(self):
-        filters = tk.Frame(self.content, bg=BG)
-        filters.pack(fill="x", pady=(0, 12))
-        self.kind_var = tk.StringVar(value=getattr(self, "filter_kind", "Tất cả loại"))
-        self.category_var = tk.StringVar(value=getattr(self, "filter_category", "Tất cả danh mục"))
-        self.search_var = tk.StringVar(value=getattr(self, "filter_search", ""))
-        for var, values, width in ((self.kind_var, ("Tất cả loại", "Chi tiêu", "Thu nhập"), 13),
-                                   (self.category_var, ("Tất cả danh mục", *dict.fromkeys(
-                                       (*EXPENSE_CATEGORIES, *INCOME_CATEGORIES))), 19)):
-            combo = ttk.Combobox(filters, textvariable=var, values=values, state="readonly", width=width)
-            combo.pack(side="left", padx=(0, 8))
-            combo.bind("<<ComboboxSelected>>", lambda _event: self.apply_filters())
-        entry = ttk.Entry(filters, textvariable=self.search_var, width=22)
-        entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
-        entry.bind("<Return>", lambda _event: self.apply_filters())
-        button(filters, "Tìm", self.apply_filters).pack(side="left", padx=(0, 8))
-        button(filters, "Bỏ lọc", self.reset_filters).pack(side="left")
-
-        kind = {"Chi tiêu": "expense", "Thu nhập": "income"}.get(self.kind_var.get())
-        category = None if self.category_var.get() == "Tất cả danh mục" else self.category_var.get()
-        self.filtered_records = self.store.list_transactions(month=self.month, kind=kind,
-                                                             category=category, search=self.search_var.get())
-        income = sum(r.amount for r in self.filtered_records if r.kind == "income")
-        expense = sum(r.amount for r in self.filtered_records if r.kind == "expense")
-        label(self.content, f"{len(self.filtered_records)} giao dịch  •  Thu {money(income)}  •  Chi {money(expense)}",
-              10, MUTED).pack(anchor="w", pady=(0, 12))
-        panel = self._panel(self.content, "Sổ thu chi", "Tìm theo ghi chú hoặc danh mục. Nhấp đúp vào một dòng để sửa.")
-        panel.pack(fill="both", expand=True)
-        self.transaction_table = self._make_table(panel, self.filtered_records)
-        if not self.filtered_records:
-            label(panel, "Không có giao dịch phù hợp.", 10, MUTED).pack(pady=(0, 16))
-        tools = tk.Frame(self.content, bg=BG)
-        tools.pack(side="bottom", before=panel, fill="x", pady=(14, 0))
-        button(tools, "Sửa giao dịch", self.edit_selected).pack(side="left", padx=(0, 8))
-        button(tools, "Xóa giao dịch", self.delete_selected, danger=True).pack(side="left")
-        button(tools, "Xuất CSV", self.export_transactions).pack(side="right")
-
-    def apply_filters(self):
-        self.filter_kind = self.kind_var.get()
-        self.filter_category = self.category_var.get()
-        self.filter_search = self.search_var.get().strip()
-        self.show_view("Giao dịch")
-
-    def reset_filters(self):
-        self.filter_kind, self.filter_category, self.filter_search = "Tất cả loại", "Tất cả danh mục", ""
-        self.show_view("Giao dịch")
-
-    def selected_transaction(self):
-        selection = self.transaction_table.selection()
-        if not selection:
-            messagebox.showinfo("Chọn giao dịch", "Hãy chọn một dòng giao dịch trước.", parent=self)
-            return None
-        return next((r for r in self.filtered_records if r.id == int(selection[0])), None)
-
-    def edit_selected(self):
-        record = self.selected_transaction()
-        if record:
-            self.open_transaction(record)
-
-    def delete_selected(self):
-        record = self.selected_transaction()
-        if not record:
-            return
-        if messagebox.askyesno("Xóa giao dịch", f"Xóa khoản {TYPE_LABELS[record.kind].lower()} "
-                               f"{money(record.amount)} ngày {display_date(record.date)}?", parent=self):
-            try:
-                self.store.delete_transaction(record.id)
-            except (ValueError, sqlite3.Error) as exc:
-                messagebox.showerror("Không thể xóa", str(exc), parent=self)
-                return
-            self.show_view(self.view)
-            self.status_var.set("Đã xóa giao dịch.")
-
-    def export_transactions(self):
-        path = filedialog.asksaveasfilename(parent=self, title="Xuất các giao dịch đang lọc",
-                                          defaultextension=".csv", filetypes=[("CSV", "*.csv")],
-                                          initialfile=f"thu_chi_{self.month}.csv")
-        if path:
-            try:
-                count = self.store.export_csv(path, self.filtered_records)
-            except (OSError, sqlite3.Error) as exc:
-                messagebox.showerror("Không xuất được CSV", str(exc), parent=self)
-                return
-            self.status_var.set(f"Đã xuất {count} giao dịch: {path}")
-
-    def _budgets(self):
-        self._budget_banner(self.content)
-        tools = tk.Frame(self.content, bg=BG)
-        tools.pack(fill="x", pady=(0, 14))
-        label(tools, "Cảnh báo từ 80% • Vượt ngân sách khi chi > giới hạn", 10, MUTED).pack(side="left")
-        button(tools, "+ Đặt ngân sách", self.open_budget, primary=True).pack(side="right")
-        statuses = self.store.budget_statuses(self.month)
-        panel = self._panel(self.content, "Ngân sách tháng", "Chọn một dòng để thay đổi hoặc gỡ giới hạn.")
-        panel.pack(fill="both", expand=True)
-        wrapper = tk.Frame(panel, bg=WHITE)
-        wrapper.pack(fill="both", expand=True, padx=16, pady=15)
-        cols = ("category", "limit", "spent", "remaining", "state")
-        self.budget_table = ttk.Treeview(wrapper, columns=cols, show="headings", selectmode="browse")
-        for name, title, width in (("category", "DANH MỤC", 150), ("limit", "GIỚI HẠN", 135),
-                                   ("spent", "ĐÃ CHI", 135), ("remaining", "CÒN LẠI", 135),
-                                   ("state", "TRẠNG THÁI", 150)):
-            self.budget_table.heading(name, text=title, anchor="w")
-            self.budget_table.column(name, width=width, minwidth=90, anchor="w")
-        self.budget_table.pack(fill="both", expand=True)
-        self.budget_table.tag_configure("over", foreground=RED)
-        self.budget_table.tag_configure("near", foreground="#9A6C21")
-        for s in statuses:
-            text = "Vượt" if s.exceeded else ("Sắp hết" if s.near_limit else "Trong ngân sách")
-            self.budget_table.insert("", "end", iid=s.category, values=(s.category, money(s.limit),
-                                     money(s.spent), money(s.remaining), f"{text} ({s.ratio:.0%})"),
-                                     tags=("over" if s.exceeded else "near" if s.near_limit else "ok",))
-        self.budget_table.bind("<Double-1>", lambda _event: self.edit_budget())
-        if not statuses:
-            label(panel, "Đặt ngân sách tổng hoặc từng danh mục để bắt đầu.", 10, MUTED).pack(pady=(0, 20))
-        actions = tk.Frame(self.content, bg=BG)
-        actions.pack(side="bottom", before=panel, fill="x", pady=(14, 0))
-        button(actions, "Sửa ngân sách", self.edit_budget).pack(side="left", padx=(0, 8))
-        button(actions, "Gỡ ngân sách", self.remove_budget, danger=True).pack(side="left")
-        label(actions, "Ngân sách tổng và danh mục được kiểm tra riêng.", 9, MUTED).pack(side="right")
-
-    def edit_budget(self):
-        selected = self.budget_table.selection()
-        if not selected:
-            messagebox.showinfo("Chọn ngân sách", "Hãy chọn một ngân sách trước.", parent=self)
-            return
-        status = next(s for s in self.store.budget_statuses(self.month) if s.category == selected[0])
-        self.open_budget(status)
-
-    def remove_budget(self):
-        selected = self.budget_table.selection()
-        if not selected:
-            messagebox.showinfo("Chọn ngân sách", "Hãy chọn một ngân sách trước.", parent=self)
-            return
-        if messagebox.askyesno("Gỡ ngân sách", f"Gỡ giới hạn {selected[0]} của tháng {self.month}?", parent=self):
-            try:
-                self.store.remove_budget(self.month, selected[0])
-            except (ValueError, sqlite3.Error) as exc:
-                messagebox.showerror("Không thể gỡ", str(exc), parent=self)
-                return
-            self.show_view("Ngân sách")
-            self.status_var.set("Đã gỡ ngân sách. Các giao dịch vẫn được giữ nguyên.")
-
-    def _statistics(self):
-        self._metrics(self.content)
-        self._chart_pair(self.content, 230)
-        totals = self.store.category_totals(self.month)
-        total = sum(totals.values())
-        panel = self._panel(self.content, "Tỷ trọng chi tiêu", "Chi tiết từng danh mục trong tháng đang chọn")
-        panel.pack(fill="x")
-        row = tk.Frame(panel, bg=WHITE)
-        row.pack(fill="x", padx=18, pady=16)
-        for i, (category, amount) in enumerate(totals.items()):
-            row.columnconfigure(i, weight=1, uniform="stats")
-            block = tk.Frame(row, bg=WHITE)
-            block.grid(row=0, column=i, sticky="nsew", padx=4)
-            label(block, category, 10, MUTED).pack(anchor="w")
-            label(block, f"{amount / total:.1%}" if total else "0%", 19, GREEN, True).pack(anchor="w", pady=4)
-            label(block, money(amount), 9).pack(anchor="w")
-
-    def _dialog(self, title, width=470, height=545):
-        dialog = tk.Toplevel(self)
-        dialog.title(title)
-        dialog.configure(bg=WHITE)
-        dialog.resizable(False, False)
-        x = self.winfo_rootx() + max(0, (self.winfo_width() - width) // 2)
-        y = self.winfo_rooty() + max(0, (self.winfo_height() - height) // 2)
-        dialog.geometry(f"{width}x{height}+{x}+{y}")
-        dialog.transient(self)
-        dialog.grab_set()
-        dialog.bind("<Escape>", lambda _event: dialog.destroy())
-        body = tk.Frame(dialog, bg=WHITE)
-        body.pack(fill="both", expand=True, padx=27, pady=23)
-        label(body, title, 20, bold=True).pack(anchor="w", pady=(0, 15))
-        return dialog, body
-
-    @staticmethod
-    def _form_field(parent, title, variable, values=None, readonly=False):
-        label(parent, title, 10, MUTED).pack(anchor="w", pady=(9, 5))
-        if values is not None:
-            widget = ttk.Combobox(parent, textvariable=variable, values=values, state="readonly")
-        else:
-            widget = ttk.Entry(parent, textvariable=variable, state="readonly" if readonly else "normal")
-        widget.pack(fill="x")
-        return widget
-
-    def open_transaction(self, record=None):
-        # Không mở thêm hộp nhập khi người dùng đang sửa một hộp khác.
-        if self.grab_current() is not None:
-            return
-        dialog, body = self._dialog("Sửa giao dịch" if record else "Thêm giao dịch")
-        default_date = date.today().isoformat() if self.month == date.today().strftime("%Y-%m") else self.month + "-01"
-        kind_var = tk.StringVar(value=TYPE_LABELS[record.kind] if record else "Chi tiêu")
-        date_var = tk.StringVar(value=record.date if record else default_date)
-        category_var = tk.StringVar(value=record.category if record else EXPENSE_CATEGORIES[0])
-        amount_var = tk.StringVar(value=str(record.amount) if record else "")
-        note_var = tk.StringVar(value=record.note if record else "")
-        kind_box = self._form_field(body, "Loại giao dịch", kind_var, list(TYPE_LABELS.values()))
-        self._form_field(body, "Ngày (YYYY-MM-DD)", date_var)
-        category_box = self._form_field(body, "Danh mục", category_var, EXPENSE_CATEGORIES)
-
-        def update_categories(_event=None):
-            categories = INCOME_CATEGORIES if kind_var.get() == "Thu nhập" else EXPENSE_CATEGORIES
-            category_box.configure(values=categories)
-            if category_var.get() not in categories:
-                category_var.set(categories[0])
-
-        kind_box.bind("<<ComboboxSelected>>", update_categories)
-        update_categories()
-        amount_entry = self._form_field(body, "Số tiền (VND), ví dụ 50.000", amount_var)
-        self._form_field(body, "Ghi chú (tối đa 200 ký tự)", note_var)
-        error_var = tk.StringVar()
-        tk.Label(body, textvariable=error_var, bg=WHITE, fg=RED, font=("Segoe UI", 9),
-                 wraplength=410, anchor="w", justify="left").pack(fill="x", pady=(10, 0))
-
-        def save():
-            try:
-                kind = "income" if kind_var.get() == "Thu nhập" else "expense"
-                values = (date_var.get().strip(), kind, category_var.get(),
-                          parse_amount(amount_var.get()), note_var.get())
-                if record:
-                    self.store.update_transaction(record.id, *values)
+def _sidebar(store, demo):
+    with st.sidebar:
+        st.markdown('''<div class="brand"><div class="brand-icon">🎓💳</div>
+            <div class="brand-name">UniSpend</div>
+            <div class="muted">Quản lý chi tiêu sinh viên</div></div>''', unsafe_allow_html=True)
+        today = date.today()
+        pending = st.session_state.pop("pending_month", None)
+        if pending:
+            st.session_state["report_month"] = pending
+        selected = st.session_state.get("report_month", today.strftime("%Y-%m"))
+        months = sorted(set(store.available_months() + [today.strftime("%Y-%m"), selected]), reverse=True)
+        month = st.selectbox("📅 Chọn tháng xem báo cáo", months, key="report_month")
+        with st.expander("Xem một tháng khác"):
+            with st.form("choose_month"):
+                custom_month = st.text_input("Tháng (YYYY-MM)", value=month)
+                if st.form_submit_button("Xem tháng", width="stretch"):
+                    try:
+                        st.session_state["pending_month"] = validate_month(custom_month.strip())
+                        st.rerun()
+                    except ValueError as exc:
+                        st.error(str(exc))
+        st.divider()
+        st.markdown("### ➕ Nhập khoản thu / chi")
+        kind_label = st.radio("Loại giao dịch", ["Chi tiêu", "Thu nhập"], horizontal=True, key="quick_kind")
+        kind = "expense" if kind_label == "Chi tiêu" else "income"
+        categories = EXPENSE_CATEGORIES if kind == "expense" else INCOME_CATEGORIES
+        with st.form(f"quick_add_{kind}", clear_on_submit=True):
+            category = st.selectbox("Danh mục", categories, format_func=_category_label, key=f"quick_category_{kind}")
+            transaction_date = st.date_input("Ngày giao dịch", value=today, min_value=date.min, max_value=date.max)
+            amount = st.number_input("Số tiền (VNĐ)", min_value=0, max_value=MAX_AMOUNT, value=45_000,
+                                     step=5_000, format="%d", key=f"quick_amount_{kind}")
+            note = st.text_input("Ghi chú chi tiết", max_chars=200, placeholder="VD: Cơm trưa, đổ xăng, tiền trọ…")
+            if st.form_submit_button("💾 Lưu giao dịch", type="primary", width="stretch"):
+                try:
+                    store.add_transaction(transaction_date.isoformat(), kind, category, amount, note)
+                except (ValueError, sqlite3.Error) as exc:
+                    st.error(f"Không lưu được giao dịch: {exc}")
                 else:
-                    self.store.add_transaction(*values)
-            except (ValueError, sqlite3.Error) as exc:
-                error_var.set(str(exc))
-                return
-            saved_month = values[0][:7]
-            self.month = saved_month
-            self.month_var.set(saved_month)
-            dialog.destroy()
-            self.show_view(self.view)
-            self.status_var.set("Đã lưu giao dịch.")
-            if kind == "expense":
-                alerts = [s for s in self.store.budget_statuses(saved_month)
-                          if s.category in (TOTAL, values[2]) and (s.exceeded or s.near_limit)]
-                if alerts:
-                    lines = []
-                    for status in alerts:
-                        if status.exceeded:
-                            lines.append(f"{status.category}: vượt {money(-status.remaining)} "
-                                         f"(đã chi {money(status.spent)} / {money(status.limit)}).")
-                        else:
-                            lines.append(f"{status.category}: đã dùng {status.ratio:.0%}, "
-                                         f"còn {money(status.remaining)}.")
-                    messagebox.showwarning("Lưu ý ngân sách", "\n".join(lines), parent=self)
+                    st.session_state["pending_month"] = transaction_date.strftime("%Y-%m")
+                    _notice("Đã lưu giao dịch thành công.")
+        st.divider()
+        if demo:
+            st.info("Bạn đang sử dụng dữ liệu mẫu, được lưu riêng với dữ liệu cá nhân.")
+        else:
+            st.caption("🔒 Dữ liệu được lưu trên máy của bạn.")
+        st.caption("Đơn vị: đồng Việt Nam (VNĐ)")
+    return month
 
-        actions = tk.Frame(body, bg=WHITE)
-        actions.pack(side="bottom", fill="x", pady=(12, 0))
-        button(actions, "Lưu giao dịch", save, primary=True).pack(side="right")
-        button(actions, "Hủy", dialog.destroy).pack(side="right", padx=8)
-        dialog.bind("<Return>", lambda _event: save())
-        amount_entry.focus_set()
 
-    def open_budget(self, status=None):
-        dialog, body = self._dialog("Sửa ngân sách" if status else "Đặt ngân sách", height=365)
-        label(body, f"Áp dụng cho tháng {self.month[5:]}/{self.month[:4]}", 10, MUTED).pack(anchor="w")
-        category_var = tk.StringVar(value=status.category if status else TOTAL)
-        amount_var = tk.StringVar(value=str(status.limit) if status else "")
-        category_box = self._form_field(body, "Ngân sách cho", category_var, (TOTAL, *EXPENSE_CATEGORIES))
+def _hero(month, demo):
+    year, number = month.split("-")
+    st.markdown(f'''<div class="hero-banner"><div>
+        <div class="hero-title">🎓 UniSpend — Quản Lý Chi Tiêu Sinh Viên</div>
+        <p class="hero-subtitle">Nhập thu chi hằng ngày • Theo dõi khoản chi thiết yếu • Chủ động ngân sách</p>
+        </div><div class="hero-badge"><span>KỲ BÁO CÁO{' · DỮ LIỆU MẪU' if demo else ''}</span>
+        <strong>Tháng {number} / {year}</strong></div></div>''', unsafe_allow_html=True)
+
+
+def _alerts(statuses, *, detailed=False):
+    active = [status for status in statuses if status.near_limit]
+    if detailed:
+        active = statuses
+    if not statuses:
+        st.info("Chưa đặt ngân sách tháng này. Mở tab Cảnh báo & Ngân sách để thiết lập hạn mức.")
+    elif not active:
+        st.markdown('<div class="alert-box alert-safe">✅ <strong>Chi tiêu đang trong định mức ngân sách đã đặt.</strong></div>', unsafe_allow_html=True)
+    for status in active:
+        level, title, detail = _status_text(status)
+        st.markdown(f'''<div class="alert-box alert-{level}"><div>
+            <strong>{escape(status.category)}:</strong> {escape(detail)}</div>
+            <span class="essential-pill pill-{level}">{title}</span></div>''', unsafe_allow_html=True)
+
+
+def _metrics(summary, budgets):
+    total = budgets.get(TOTAL_BUDGET_CATEGORY)
+    expense_hint = f"Đã dùng {total.ratio:.1%} ngân sách tháng" if total else "Chưa đặt ngân sách tổng"
+    budget_hint = _status_text(total)[2] if total else "Thiết lập trong tab Ngân sách"
+    cards = [
+        ("Tổng thu nhập", money(summary["income"]), "💰", "#15803D", "#DCFCE7", "Gia đình, làm thêm và học bổng"),
+        ("Tổng chi tiêu", money(summary["expense"]), "💸", "#B91C1C", "#FEE2E2", expense_hint),
+        ("Chênh lệch thu chi", money(summary["balance"]), "🏦", "#2563EB" if summary["balance"] >= 0 else "#DC2626", "#DBEAFE", "Thu nhập trừ chi tiêu trong tháng"),
+        ("Ngân sách tháng", money(total.limit) if total else "Chưa thiết lập", "🎯", "#4F46E5", "#EDE9FE", budget_hint),
+    ]
+    for column, (title, value, icon, color, tint, hint) in zip(st.columns(4), cards):
+        with column:
+            st.markdown(f'''<div class="kpi-card"><div class="kpi-top">
+                <span class="kpi-label">{title}</span><div class="kpi-icon" style="background:{tint}">{icon}</div></div>
+                <div class="kpi-value" style="color:{color}">{value}</div>
+                <div class="kpi-sub">{hint}</div></div>''', unsafe_allow_html=True)
+
+
+def _overview(store, month, summary, budgets):
+    st.markdown('<div class="section-heading">🍜 Theo dõi 3 khoản chi thiết yếu</div>', unsafe_allow_html=True)
+    totals = store.category_totals(month)
+    for column, category in zip(st.columns(3), ("Ăn uống", "Tiền trọ", "Đi lại")):
+        icon, title, color, description = CATEGORY_META[category]
+        spent = totals[category]
+        status = budgets.get(category)
+        share = spent / summary["expense"] * 100 if summary["expense"] else 0
         if status:
-            category_box.configure(state="disabled")
-        amount_entry = self._form_field(body, "Giới hạn chi tiêu (VND)", amount_var)
-        error_var = tk.StringVar()
-        tk.Label(body, textvariable=error_var, bg=WHITE, fg=RED, font=("Segoe UI", 9),
-                 wraplength=410, anchor="w", justify="left").pack(fill="x", pady=(8, 0))
+            level, badge, detail = _status_text(status)
+            limit = money(status.limit)
+            progress = min(100, status.ratio * 100)
+            if level != "safe":
+                color = "#DC2626" if level == "danger" else "#D97706"
+        else:
+            level, badge, detail, limit, progress = "neutral", "Chưa đặt hạn mức", "Đặt ngân sách để theo dõi tiến độ", "Chưa thiết lập", 0
+        with column:
+            st.markdown(f'''<div class="essential-card"><div class="essential-header">
+                <div class="essential-title">{icon} {title}</div><span class="essential-pill pill-{level}">{badge}</span></div>
+                <div class="essential-amount">{money(spent)}</div>
+                <div class="essential-limit">Định mức: <strong>{limit}</strong> · Chiếm <strong>{share:.1f}%</strong> tổng chi</div>
+                <div class="progress-track"><div class="progress-fill" style="width:{progress:.1f}%;background:{color}"></div></div>
+                <div class="essential-note">{detail}</div><div class="essential-desc">{description}</div></div>''', unsafe_allow_html=True)
+    st.markdown('<div class="section-heading">📌 Tổng hợp chi tiêu trong tháng</div>', unsafe_allow_html=True)
+    left, right = st.columns([1.25, 1])
+    with left:
+        rows = []
+        for category, spent in totals.items():
+            status = budgets.get(category)
+            rows.append({"Danh mục": _category_label(category), "Đã chi (VNĐ)": spent,
+                         "Định mức (VNĐ)": status.limit if status else None,
+                         "Tỷ lệ dùng (%)": round(status.ratio * 100, 1) if status else None,
+                         "Tỷ trọng (%)": round(spent / summary["expense"] * 100, 1) if summary["expense"] else 0})
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch", column_config={
+            "Đã chi (VNĐ)": st.column_config.NumberColumn(format="localized"),
+            "Định mức (VNĐ)": st.column_config.NumberColumn(format="localized"),
+            "Tỷ lệ dùng (%)": st.column_config.NumberColumn(format="%.1f%%"),
+            "Tỷ trọng (%)": st.column_config.NumberColumn(format="%.1f%%"),
+        })
+        st.caption(f"{summary['count']} giao dịch thu và chi trong tháng đang chọn.")
+    with right:
+        if summary["expense"]:
+            st.altair_chart(charts.category_donut(totals), width="stretch")
+        else:
+            st.info("Chưa có chi tiêu trong tháng này. Thêm giao dịch ở thanh bên để bắt đầu.")
 
-        def save():
+
+def _charts(store, month):
+    st.markdown('<div class="section-heading">📈 Biểu đồ chi tiêu theo tháng & xu hướng</div>', unsafe_allow_html=True)
+    year, number = map(int, month.split("-"))
+    count = min(6, (year - 1) * 12 + number)
+    monthly = store.monthly_totals(month, count=count)
+    months = [row["month"] for row in monthly]
+    records = [record for record in store.list_transactions() if months[0] <= record.date[:7] <= month]
+    st.caption("6 tháng gần nhất, kết thúc ở tháng đang chọn. Di chuột lên biểu đồ để xem số tiền.")
+    if not records:
+        st.info("Chưa có giao dịch trong khoảng thời gian này.")
+        return
+    left, right = st.columns(2)
+    with left:
+        st.altair_chart(charts.monthly_income_expense(monthly), width="stretch")
+    with right:
+        st.altair_chart(charts.monthly_categories(records, months), width="stretch")
+    st.markdown('<div class="section-heading">🍜 Biến động Tiền ăn · Tiền trọ · Đi lại</div>', unsafe_allow_html=True)
+    st.altair_chart(charts.essential_trend(records, months), width="stretch")
+    st.markdown(f'<div class="section-heading">📅 Chi tiêu hằng ngày — {month}</div>', unsafe_allow_html=True)
+    st.altair_chart(charts.daily_expenses(records, month), width="stretch")
+
+
+def _budgets(store, month, statuses, budgets):
+    st.markdown(f'<div class="section-heading">🚨 Kiểm soát & thiết lập ngân sách — {month}</div>', unsafe_allow_html=True)
+    left, right = st.columns([1.1, 1])
+    with left:
+        st.markdown("#### 📋 Tình hình ngân sách")
+        _alerts(statuses, detailed=True)
+        category_statuses = [status for status in statuses if status.category != TOTAL_BUDGET_CATEGORY]
+        if category_statuses:
+            st.altair_chart(charts.budget_comparison(category_statuses), width="stretch")
+    with right:
+        with st.container(border=True):
+            st.markdown("#### ⚙️ Điều chỉnh định mức")
+            st.caption("Từ 80%: cảnh báo vàng. Vượt 100%: báo động đỏ. Nhập 0 để bỏ hạn mức.")
+            with st.form(f"budget_{month}"):
+                amounts = {}
+                for category in (TOTAL_BUDGET_CATEGORY, *EXPENSE_CATEGORIES):
+                    title = "🎯 Tổng ngân sách tháng (VNĐ)" if category == TOTAL_BUDGET_CATEGORY else f"{_category_label(category)} (VNĐ)"
+                    current = budgets.get(category)
+                    amounts[category] = st.number_input(title, min_value=0, max_value=MAX_AMOUNT,
+                                                        value=current.limit if current else 0, step=50_000,
+                                                        format="%d", key=f"budget_{month}_{category}")
+                if st.form_submit_button("💾 Lưu ngân sách", type="primary", width="stretch"):
+                    try:
+                        store.set_budgets(month, amounts)
+                    except (ValueError, sqlite3.Error) as exc:
+                        st.error(f"Không lưu được ngân sách: {exc}")
+                    else:
+                        _notice(f"Đã lưu ngân sách tháng {month}.")
+
+
+def _csv_bytes(records):
+    """CSV cho Excel, cùng quy tắc chống công thức như ExpenseStore.export_csv."""
+    stream = io.StringIO(newline="")
+    writer = csv.writer(stream)
+    writer.writerow(("Mã", "Ngày", "Loại", "Danh mục", "Số tiền (VNĐ)", "Ghi chú"))
+    for record in records:
+        note = record.note
+        if note.lstrip().startswith(("=", "+", "-", "@")):
+            note = "'" + note
+        writer.writerow((record.id, record.date, TYPE_LABELS[record.kind], record.category, record.amount, note))
+    return stream.getvalue().encode("utf-8-sig")
+
+
+def _edit_transaction(store, records):
+    indexed = {record.id: record for record in records}
+    selected_id = st.selectbox("Chọn giao dịch", list(indexed), key="edit_transaction_id",
+                               format_func=lambda value: f"#{value} · {indexed[value].date} · {indexed[value].category} · {money(indexed[value].amount)}")
+    record = indexed[selected_id]
+    # Loại đặt ngoài form để cập nhật ngay danh mục khi người dùng đổi thu/chi.
+    kind = st.radio("Loại giao dịch cần sửa", ["expense", "income"],
+                    index=0 if record.kind == "expense" else 1,
+                    format_func=TYPE_LABELS.get, horizontal=True, key=f"edit_kind_{record.id}")
+    categories = EXPENSE_CATEGORIES if kind == "expense" else INCOME_CATEGORIES
+    with st.form(f"edit_{record.id}_{kind}"):
+        transaction_date = st.date_input("Ngày", value=date.fromisoformat(record.date), min_value=date.min, max_value=date.max)
+        category = st.selectbox("Danh mục mới", categories,
+                               index=categories.index(record.category) if record.category in categories else 0,
+                               format_func=_category_label)
+        amount = st.number_input("Số tiền mới (VNĐ)", min_value=0, max_value=MAX_AMOUNT, value=record.amount, format="%d", step=5_000)
+        note = st.text_input("Ghi chú mới", value=record.note, max_chars=200)
+        if st.form_submit_button("Lưu thay đổi", type="primary", width="stretch"):
             try:
-                amount = parse_amount(amount_var.get())
-                existing = next((s for s in self.store.budget_statuses(self.month)
-                                 if s.category == category_var.get()), None)
-                if not status and existing and not messagebox.askyesno(
-                        "Thay ngân sách", f"{category_var.get()} đã có giới hạn {money(existing.limit)}. "
-                        f"Thay bằng {money(amount)}?", parent=dialog):
-                    return
-                self.store.set_budget(self.month, category_var.get(), amount)
+                store.update_transaction(record.id, transaction_date.isoformat(), kind, category, amount, note)
             except (ValueError, sqlite3.Error) as exc:
-                error_var.set(str(exc))
-                return
-            dialog.destroy()
-            self.show_view("Ngân sách")
-            self.status_var.set("Đã lưu ngân sách tháng.")
+                st.error(f"Không sửa được giao dịch: {exc}")
+            else:
+                st.session_state["pending_month"] = transaction_date.strftime("%Y-%m")
+                _notice(f"Đã cập nhật giao dịch #{record.id}.")
 
-        actions = tk.Frame(body, bg=WHITE)
-        actions.pack(side="bottom", fill="x", pady=(10, 0))
-        button(actions, "Lưu ngân sách", save, primary=True).pack(side="right")
-        button(actions, "Hủy", dialog.destroy).pack(side="right", padx=8)
-        dialog.bind("<Return>", lambda _event: save())
-        amount_entry.focus_set()
+
+def _ledger(store, month):
+    st.markdown(f'<div class="section-heading">📝 Sổ thu / chi hằng ngày — {month}</div>', unsafe_allow_html=True)
+    kind_column, category_column, search_column = st.columns([1, 1.2, 2])
+    with kind_column:
+        kind_label = st.selectbox("Lọc theo loại", ["Tất cả", "Chi tiêu", "Thu nhập"])
+    with category_column:
+        category = st.selectbox("Lọc theo danh mục", ["Tất cả", *dict.fromkeys((*EXPENSE_CATEGORIES, *INCOME_CATEGORIES))])
+    with search_column:
+        keyword = st.text_input("🔍 Tìm theo ghi chú hoặc danh mục", placeholder="Nhập từ khóa…")
+    records = store.list_transactions(month=month, kind={"Chi tiêu": "expense", "Thu nhập": "income"}.get(kind_label),
+                                      category=category if category != "Tất cả" else None, search=keyword)
+    income = sum(record.amount for record in records if record.kind == "income")
+    expense = sum(record.amount for record in records if record.kind == "expense")
+    info, download = st.columns([3, 1])
+    with info:
+        st.caption(f"{len(records)} giao dịch · Thu: {money(income)} · Chi: {money(expense)}")
+    with download:
+        st.download_button("📥 Xuất CSV", _csv_bytes(records), file_name=f"chi_tieu_{month}.csv",
+                           mime="text/csv", width="stretch", disabled=not records)
+    if not records:
+        st.info("Không có giao dịch khớp với bộ lọc. Bạn có thể nhập giao dịch ở thanh bên.")
+        return
+    st.dataframe(pd.DataFrame([{"Mã GD": record.id, "Ngày": record.date,
+                               "Loại": TYPE_LABELS[record.kind], "Danh mục": record.category,
+                               "Số tiền (VNĐ)": record.amount, "Ghi chú": record.note} for record in records]),
+                 hide_index=True, width="stretch", column_config={
+                     "Mã GD": st.column_config.NumberColumn(format="%d"),
+                     "Số tiền (VNĐ)": st.column_config.NumberColumn(format="localized"),
+                     "Ghi chú": st.column_config.TextColumn(width="large"),
+                 })
+    with st.expander("✏️ Sửa giao dịch"):
+        _edit_transaction(store, records)
+    with st.expander("🗑️ Xóa giao dịch nhập nhầm"):
+        indexed = {record.id: record for record in records}
+        selected_id = st.selectbox("Giao dịch cần xóa", list(indexed), key="delete_transaction_id",
+                                   format_func=lambda value: f"#{value} · {indexed[value].date} · {indexed[value].category} · {money(indexed[value].amount)}")
+        with st.form(f"delete_{selected_id}"):
+            confirmed = st.checkbox(f"Tôi xác nhận xóa giao dịch #{selected_id}.")
+            if st.form_submit_button("Xóa giao dịch", width="stretch"):
+                if not confirmed:
+                    st.warning("Đánh dấu xác nhận trước khi xóa giao dịch.")
+                else:
+                    try:
+                        store.delete_transaction(selected_id)
+                    except (ValueError, sqlite3.Error) as exc:
+                        st.error(f"Không xóa được giao dịch: {exc}")
+                    else:
+                        _notice(f"Đã xóa giao dịch #{selected_id}.")
+
+
+def run_app(db_path, demo=False):
+    st.set_page_config(page_title="UniSpend — Quản lý chi tiêu sinh viên", page_icon="🎓",
+                       layout="wide", initial_sidebar_state="expanded")
+    css = Path(__file__).with_name("theme.css").read_text(encoding="utf-8")
+    st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
+    try:
+        store = ExpenseStore(db_path)
+    except (OSError, sqlite3.Error) as exc:
+        st.error(f"Không mở được dữ liệu: {exc}")
+        return
+    # Mỗi lần hiển thị dùng một kết nối riêng, đóng cả khi Streamlit rerun.
+    try:
+        demo_key = f"demo_initialized:{Path(db_path).resolve()}"
+        if demo and not st.session_state.get(demo_key):
+            store.seed_demo()
+            st.session_state[demo_key] = True
+        month = _sidebar(store, demo)
+        _hero(month, demo)
+        notice = st.session_state.pop("notice", None)
+        if notice:
+            st.success(notice)
+        summary = store.summary(month)
+        statuses = store.budget_statuses(month)
+        budgets = {status.category: status for status in statuses}
+        _alerts(statuses)
+        _metrics(summary, budgets)
+        overview, chart_tab, budget_tab, ledger = st.tabs([
+            "📊 Tổng quan", "📈 Biểu đồ theo tháng", "🚨 Cảnh báo & Ngân sách", "📝 Sổ giao dịch"])
+        with overview:
+            _overview(store, month, summary, budgets)
+        with chart_tab:
+            _charts(store, month)
+        with budget_tab:
+            _budgets(store, month, statuses, budgets)
+        with ledger:
+            _ledger(store, month)
+        st.caption("UniSpend · Ghi chép hôm nay, chủ động ngày mai.")
+    except (OSError, sqlite3.Error) as exc:
+        st.error(f"Không đọc hoặc lưu được dữ liệu: {exc}")
+    finally:
+        store.close()

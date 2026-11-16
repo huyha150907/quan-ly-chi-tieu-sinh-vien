@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 data/*.db
 data/*.db-*
+/unispend_3d/data/
 .tools/
 tmp/
 .venv/

@@ -1,6 +1,7 @@
 """Kiểm thử nghiệp vụ bằng cơ sở dữ liệu tạm, không đụng dữ liệu người dùng."""
 
 import csv
+import sqlite3
 from datetime import date
 from pathlib import Path
 import tempfile
@@ -188,6 +189,54 @@ class ExpenseStoreTests(unittest.TestCase):
                 self.store.set_budget("2026-11", "Ăn uống", amount)
         with self.assertRaises(ValueError):
             self.store.set_budget("2026-11", "Làm thêm", 100_000)
+
+    def test_available_months_includes_budgets_and_deduplicates(self):
+        self.assertEqual(self.store.available_months(), [])
+        self.expense(day="2026-11-01")
+        self.expense(day="2026-11-15")
+        self.expense(day="2025-12-31")
+        self.store.set_budget("2026-11", "Ăn uống", 100_000)
+        self.store.set_budget("2027-01", "Ăn uống", 100_000)
+        self.assertEqual(self.store.available_months(), ["2027-01", "2026-11", "2025-12"])
+
+    def test_batch_budgets_updates_removes_and_preserves_omitted_categories(self):
+        self.store.set_budgets("2026-11", {"Ăn uống": 100_000, "Đi lại": 50_000, "Khác": 30_000})
+        self.store.set_budgets("2026-10", {"Đi lại": 10_000})
+        self.store.set_budgets("2026-11", {"Ăn uống": 200_000, "Đi lại": 0, "Học tập": 80_000})
+        limits = {item.category: item.limit for item in self.store.budget_statuses("2026-11")}
+        self.assertEqual(limits, {"Ăn uống": 200_000, "Khác": 30_000, "Học tập": 80_000})
+        self.assertEqual(self.store.budget_statuses("2026-10")[0].limit, 10_000)
+
+    def test_batch_budgets_rejects_all_invalid_inputs_before_writing(self):
+        self.store.set_budget("2026-11", "Ăn uống", 100_000)
+        invalid_batches = [
+            {"Ăn uống": 0, "Làm thêm": 20_000},
+            *({"Ăn uống": 0, "Đi lại": amount}
+              for amount in (-1, True, False, 1.5, "20000", 1_000_000_000_001)),
+        ]
+        for amounts in invalid_batches:
+            with self.subTest(amounts=amounts), self.assertRaises(ValueError):
+                self.store.set_budgets("2026-11", amounts)
+            self.assertEqual(
+                [(item.category, item.limit) for item in self.store.budget_statuses("2026-11")],
+                [("Ăn uống", 100_000)],
+            )
+        with self.assertRaises(ValueError):
+            self.store.set_budgets("2026-13", {"Ăn uống": 0})
+
+    def test_batch_budgets_rolls_back_deletions_if_later_write_fails(self):
+        self.store.set_budget("2026-11", "Ăn uống", 100_000)
+        self.store.connection.execute("""
+            CREATE TRIGGER reject_transport_budget BEFORE INSERT ON budgets
+            WHEN NEW.category='Đi lại'
+            BEGIN SELECT RAISE(ABORT, 'test rollback'); END
+        """)
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.store.set_budgets("2026-11", {"Ăn uống": 0, "Đi lại": 50_000})
+        self.assertEqual(
+            [(item.category, item.limit) for item in self.store.budget_statuses("2026-11")],
+            [("Ăn uống", 100_000)],
+        )
 
     def test_export_csv_preserves_vietnamese_and_selected_transactions(self):
         chosen_id = self.expense(note='Cơm, "trưa" ở trường')

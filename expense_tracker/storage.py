@@ -250,6 +250,16 @@ class ExpenseStore:
         indexed = {row["month"]: dict(row) for row in rows}
         return [indexed.get(month, {"month": month, "income": 0, "expense": 0}) for month in months]
 
+    def available_months(self) -> list[str]:
+        """Các tháng có giao dịch hoặc ngân sách, mới nhất trước."""
+        rows = self.connection.execute("""
+            SELECT substr(date, 1, 7) AS month FROM transactions
+            UNION
+            SELECT month FROM budgets
+            ORDER BY month DESC
+        """)
+        return [row["month"] for row in rows]
+
     def set_budget(self, month: str, category: str, amount: int) -> None:
         _month(month)
         _budget_category(category)
@@ -259,6 +269,26 @@ class ExpenseStore:
                 INSERT INTO budgets(month, category, amount) VALUES (?, ?, ?)
                 ON CONFLICT(month, category) DO UPDATE SET amount=excluded.amount
             """, (month, category, amount))
+
+    def set_budgets(self, month: str, amounts: dict[str, int]) -> None:
+        """Lưu đồng thời các hạn mức; số 0 bỏ hạn mức tương ứng."""
+        _month(month)
+        if not isinstance(amounts, dict):
+            raise ValueError("Các hạn mức phải là một bảng danh mục và số tiền.")
+        items = list(amounts.items())
+        for category, amount in items:
+            _budget_category(category)
+            if type(amount) is not int or not 0 <= amount <= MAX_AMOUNT:
+                raise ValueError("Hạn mức phải là số nguyên từ 0 đến 1.000 tỷ đồng.")
+        with self.connection:
+            self.connection.executemany(
+                "DELETE FROM budgets WHERE month=? AND category=?",
+                ((month, category) for category, amount in items if amount == 0),
+            )
+            self.connection.executemany("""
+                INSERT INTO budgets(month, category, amount) VALUES (?, ?, ?)
+                ON CONFLICT(month, category) DO UPDATE SET amount=excluded.amount
+            """, ((month, category, amount) for category, amount in items if amount > 0))
 
     def remove_budget(self, month: str, category: str) -> None:
         _month(month)

@@ -1,14 +1,16 @@
-"""Điểm chạy ứng dụng quản lý chi tiêu sinh viên."""
+"""Mở giao diện UniSpend trên trình duyệt bằng Streamlit."""
 
 import argparse
-import sqlite3
+import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
-from expense_tracker.storage import ExpenseStore
-
 
 def main():
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="Ứng dụng quản lý chi tiêu sinh viên")
     parser.add_argument("--demo", action="store_true", help="Mở dữ liệu mẫu tách riêng")
     parser.add_argument("--db", type=Path, help="Đường dẫn tới tệp SQLite khác")
@@ -17,22 +19,27 @@ def main():
         parser.error("Không dùng --demo cùng --db để tránh trộn dữ liệu mẫu.")
     base = Path(__file__).resolve().parent
     db_path = args.db or base / "data" / ("demo.db" if args.demo else "expenses.db")
-    store = None
+    interpreter = sys.executable
+    if importlib.util.find_spec("streamlit") is None:
+        local_python = base / ".venv" / "Scripts" / "python.exe"
+        if local_python.exists() and local_python.resolve() != Path(sys.executable).resolve():
+            interpreter = str(local_python)
+        else:
+            print("Cài thư viện trước khi chạy: python -m pip install -r requirements.txt", file=sys.stderr)
+            return 1
+    command = [interpreter, "-m", "streamlit", "run", str(base / "app.py"),
+               "--server.address=127.0.0.1", "--browser.gatherUsageStats=false", "--"]
+    if args.demo:
+        command.append("--demo")
+    else:
+        command.extend(["--db", str(db_path.resolve())])
     try:
-        from expense_tracker.ui import ExpenseApp
-
-        store = ExpenseStore(db_path)
-        if args.demo:
-            store.seed_demo()
-        app = ExpenseApp(store, demo=args.demo)
-        app.mainloop()
-    except (OSError, sqlite3.Error) as exc:
-        print(f"Không mở được dữ liệu: {exc}", file=sys.stderr)
+        return subprocess.run(command, cwd=base).returncode
+    except OSError as exc:
+        print(f"Không khởi động được ứng dụng: {exc}", file=sys.stderr)
         return 1
-    finally:
-        if store is not None:
-            store.close()
-    return 0
+    except KeyboardInterrupt:
+        return 0
 
 
 if __name__ == "__main__":
