@@ -1,0 +1,2 @@
+# Python 3.10+ with Tkinter. All runtime modules are in the standard library.
+# No pip packages are required.
