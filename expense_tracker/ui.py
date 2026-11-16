@@ -311,7 +311,7 @@ class ExpenseApp(tk.Tk):
         if not self.filtered_records:
             label(panel, "Không có giao dịch phù hợp.", 10, MUTED).pack(pady=(0, 16))
         tools = tk.Frame(self.content, bg=BG)
-        tools.pack(fill="x", pady=(14, 0))
+        tools.pack(side="bottom", before=panel, fill="x", pady=(14, 0))
         button(tools, "Sửa giao dịch", self.edit_selected).pack(side="left", padx=(0, 8))
         button(tools, "Xóa giao dịch", self.delete_selected, danger=True).pack(side="left")
         button(tools, "Xuất CSV", self.export_transactions).pack(side="right")
@@ -394,7 +394,7 @@ class ExpenseApp(tk.Tk):
         if not statuses:
             label(panel, "Đặt ngân sách tổng hoặc từng danh mục để bắt đầu.", 10, MUTED).pack(pady=(0, 20))
         actions = tk.Frame(self.content, bg=BG)
-        actions.pack(fill="x", pady=(14, 0))
+        actions.pack(side="bottom", before=panel, fill="x", pady=(14, 0))
         button(actions, "Sửa ngân sách", self.edit_budget).pack(side="left", padx=(0, 8))
         button(actions, "Gỡ ngân sách", self.remove_budget, danger=True).pack(side="left")
         label(actions, "Ngân sách tổng và danh mục được kiểm tra riêng.", 9, MUTED).pack(side="right")
