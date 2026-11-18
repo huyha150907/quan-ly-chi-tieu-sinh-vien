@@ -8,11 +8,23 @@ thống kê bằng Pandas và khởi tạo dữ liệu mẫu thông minh cho sin
 import os
 import sqlite3
 import json
+from contextlib import closing
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Optional
 import pandas as pd
 
-from models import Transaction, BudgetConfig, EXPENSE_CATEGORIES
+if __package__:
+    from .models import Transaction, BudgetConfig, EXPENSE_CATEGORIES
+else:
+    from models import Transaction, BudgetConfig, EXPENSE_CATEGORIES
+
+
+def database_path() -> Path:
+    configured = os.environ.get("UNISPEND_DB")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return Path(__file__).resolve().parent / "data" / "student_expense.db"
 
 
 class ExpenseDatabase:
@@ -22,9 +34,8 @@ class ExpenseDatabase:
 
     def __init__(self, db_path: str = "data/student_expense.db"):
         self.db_path = db_path
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_tables()
-        self._seed_sample_data_if_empty()
 
     def _get_conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -33,8 +44,12 @@ class ExpenseDatabase:
 
     def _init_tables(self) -> None:
         """Tạo các bảng dữ liệu nếu chưa tồn tại."""
-        with self._get_conn() as conn:
+        with closing(self._get_conn()) as conn, conn:
             cursor = conn.cursor()
+            cursor.execute("BEGIN IMMEDIATE")
+            existing = cursor.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'transactions'"
+            ).fetchone()
             # Bảng giao dịch thu/chi
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS transactions (
@@ -54,24 +69,17 @@ class ExpenseDatabase:
                     category_limits_json TEXT NOT NULL
                 )
             """)
-            conn.commit()
-
-    def _seed_sample_data_if_empty(self) -> None:
-        """
-        Tự động tạo dữ liệu mẫu đa dạng (trong 4 tháng gần nhất) nếu DB đang trống,
-        giúp giảng viên và sinh viên chạy thử có ngay biểu đồ đẹp để đánh giá.
-        """
-        with self._get_conn() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) as cnt FROM transactions")
-            count = cursor.fetchone()["cnt"]
-            if count > 0:
-                return
-
-        self.reset_to_sample_data()
+            if existing is None:
+                self._insert_sample_data(conn)
 
     def reset_to_sample_data(self) -> None:
         """Xóa dữ liệu cũ và nạp lại bộ dữ liệu mẫu thực tế của sinh viên."""
+        with closing(self._get_conn()) as conn, conn:
+            conn.execute("DELETE FROM transactions")
+            conn.execute("DELETE FROM budgets")
+            self._insert_sample_data(conn)
+
+    def _insert_sample_data(self, conn: sqlite3.Connection) -> None:
         now = datetime.now()
         y = now.year
         m = now.month
@@ -151,46 +159,41 @@ class ExpenseDatabase:
             "Chi phí khác": 200000.0,
         }
 
-        with self._get_conn() as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM transactions")
-            cursor.execute("DELETE FROM budgets")
-
-            cursor.executemany("""
-                INSERT INTO transactions (date, tx_type, category, amount, note)
-                VALUES (?, ?, ?, ?, ?)
-            """, sample_txs)
-
-            for m_key in [m_prev3, m_prev2, m_prev1, m_curr]:
-                cursor.execute("""
-                    INSERT INTO budgets (month, total_budget, category_limits_json)
-                    VALUES (?, ?, ?)
-                """, (m_key, 5500000.0, json.dumps(default_limits, ensure_ascii=False)))
-
-            conn.commit()
+        conn.executemany("""
+            INSERT INTO transactions (date, tx_type, category, amount, note)
+            VALUES (?, ?, ?, ?, ?)
+        """, sample_txs)
+        conn.executemany("""
+            INSERT INTO budgets (month, total_budget, category_limits_json)
+            VALUES (?, ?, ?)
+        """, [(month, 5500000.0, json.dumps(default_limits, ensure_ascii=False))
+              for month in (m_prev3, m_prev2, m_prev1, m_curr)])
 
     # =========================================================================
     # CÁC PHƯƠNG THỨC THAO TÁC DỮ LIỆU (CRUD)
     # =========================================================================
 
     def add_transaction(self, tx: Transaction) -> tuple[bool, str]:
+        tx_id, message = self.insert_transaction(tx)
+        return tx_id is not None, message
+
+    def insert_transaction(self, tx: Transaction) -> tuple[int | None, str]:
         """Thêm một khoản thu/chi mới sau khi kiểm tra lỗi dữ liệu đầu vào."""
         is_valid, msg = tx.validate()
         if not is_valid:
-            return False, msg
+            return None, msg
 
-        with self._get_conn() as conn:
+        with closing(self._get_conn()) as conn, conn:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO transactions (date, tx_type, category, amount, note)
                 VALUES (?, ?, ?, ?, ?)
             """, (tx.date, tx.tx_type, tx.category, tx.amount, tx.note.strip()))
-            conn.commit()
-        return True, "Đã lưu giao dịch thành công!"
+            return cursor.lastrowid, "Đã lưu giao dịch thành công!"
 
     def delete_transaction(self, tx_id: int) -> bool:
         """Xóa một giao dịch theo ID."""
-        with self._get_conn() as conn:
+        with closing(self._get_conn()) as conn, conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM transactions WHERE id = ?", (tx_id,))
             conn.commit()
@@ -201,7 +204,7 @@ class ExpenseDatabase:
         Đọc danh sách giao dịch ra Pandas DataFrame để phục vụ thống kê và vẽ biểu đồ.
         Nếu truyền `month` (YYYY-MM), lọc riêng tháng đó.
         """
-        with self._get_conn() as conn:
+        with closing(self._get_conn()) as conn, conn:
             if month:
                 query = "SELECT * FROM transactions WHERE substr(date, 1, 7) = ? ORDER BY date DESC, id DESC"
                 df = pd.read_sql_query(query, conn, params=(month,))
@@ -219,9 +222,9 @@ class ExpenseDatabase:
     def get_available_months(self) -> List[str]:
         """Lấy danh sách các tháng (YYYY-MM) đang có dữ liệu."""
         curr_m = datetime.now().strftime("%Y-%m")
-        with self._get_conn() as conn:
+        with closing(self._get_conn()) as conn, conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT DISTINCT substr(date, 1, 7) as m FROM transactions ORDER BY m DESC")
+            cursor.execute("SELECT substr(date, 1, 7) AS m FROM transactions UNION SELECT month FROM budgets")
             months = [row["m"] for row in cursor.fetchall() if row["m"]]
         if curr_m not in months:
             months.insert(0, curr_m)
@@ -242,7 +245,7 @@ class ExpenseDatabase:
             "Giải trí & Xã giao": 300000.0,
             "Chi phí khác": 200000.0,
         }
-        with self._get_conn() as conn:
+        with closing(self._get_conn()) as conn, conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM budgets WHERE month = ?", (month,))
             row = cursor.fetchone()
@@ -260,7 +263,7 @@ class ExpenseDatabase:
 
     def save_budget_config(self, config: BudgetConfig) -> None:
         """Lưu hoặc cập nhật định mức ngân sách tháng."""
-        with self._get_conn() as conn:
+        with closing(self._get_conn()) as conn, conn:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO budgets (month, total_budget, category_limits_json)

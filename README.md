@@ -23,15 +23,16 @@ Mở dữ liệu mẫu hoặc chọn tệp dữ liệu khác:
 
 Chế độ thường dùng `data/expenses.db`, ban đầu chưa có giao dịch. Chế độ mẫu dùng `data/demo.db` riêng, có dữ liệu tháng hiện tại và năm tháng trước. Mở lại chế độ mẫu không chèn trùng dữ liệu; các chỉnh sửa được lưu trong tệp mẫu. Không dùng đồng thời `--demo` và `--db`.
 
-### Bản giao diện UniSpend 3D
+### Giao diện UniSpend và FastAPI
 
-Bản giao diện có hiệu ứng nghiêng thẻ, ánh sáng theo chuột và thẻ ví lật 3D nằm trong thư mục [`unispend_3d`](unispend_3d/README.md). Chạy từ thư mục dự án:
+Giao diện UniSpend có sổ thu chi, biểu đồ, ngân sách và danh sách việc cần làm. Chạy từ thư mục dự án:
 
 ```powershell
 python unispend_3d/main.py
+python unispend_3d/main.py --api
 ```
 
-Bản 3D tự tạo dữ liệu mẫu riêng trong `unispend_3d/data/`; dữ liệu này không được đưa lên GitHub.
+Chạy lệnh API trong terminal riêng, sau đó mở [Swagger UI](http://127.0.0.1:8000/docs). Xem hướng dẫn chọn tệp SQLite và danh sách endpoint trong [tài liệu UniSpend](unispend_3d/README.md).
 
 ## 2. Hướng dẫn sử dụng
 

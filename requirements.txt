@@ -1,3 +1,1 @@
-streamlit>=1.50,<2
-pandas>=2.2,<4
-altair>=5.5,<7
+-r unispend_3d/requirements.txt

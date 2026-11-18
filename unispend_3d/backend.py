@@ -10,8 +10,12 @@ vượt ngân sách, và chuẩn bị dữ liệu biểu đồ đều được x
 from typing import Dict, List, Any, Tuple
 import pandas as pd
 
-from models import Transaction, BudgetConfig, EXPENSE_CATEGORIES, INCOME_CATEGORIES
-from database import ExpenseDatabase
+if __package__:
+    from .models import Transaction, BudgetConfig, EXPENSE_CATEGORIES, INCOME_CATEGORIES
+    from .database import ExpenseDatabase
+else:
+    from models import Transaction, BudgetConfig, EXPENSE_CATEGORIES, INCOME_CATEGORIES
+    from database import ExpenseDatabase
 
 
 class ExpenseBackend:
@@ -40,6 +44,12 @@ class ExpenseBackend:
         note: str
     ) -> Tuple[bool, str]:
         """Nhận dữ liệu từ form giao diện, kiểm tra hợp lệ và lưu vào CSDL."""
+        tx, message = self.create_transaction(date_str, tx_type, category, amount, note)
+        return tx is not None, message
+
+    def create_transaction(
+        self, date_str: str, tx_type: str, category: str, amount: float, note: str
+    ) -> tuple[Transaction | None, str]:
         clean_note = note.strip() if note and note.strip() else f"{category} ({date_str})"
         tx = Transaction(
             id=0,
@@ -49,7 +59,11 @@ class ExpenseBackend:
             amount=float(amount),
             note=clean_note
         )
-        return self.db.add_transaction(tx)
+        tx_id, message = self.db.insert_transaction(tx)
+        if tx_id is None:
+            return None, message
+        tx.id = tx_id
+        return tx, message
 
     def remove_transaction(self, tx_id: int) -> bool:
         """Xóa một giao dịch theo ID."""

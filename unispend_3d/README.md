@@ -1,6 +1,6 @@
-# UniSpend 3D
+# UniSpend
 
-Bản giao diện UniSpend 3D có thẻ ví lật, hiệu ứng nghiêng theo chuột, thống kê thu chi và cảnh báo ngân sách. Mã nguồn được đóng gói từ bản đang chạy trong thư mục `quan_ly_chi_tieu_sv`.
+Giao diện quản lý chi tiêu sinh viên gồm Tổng quan, Sổ thu chi, Biểu đồ, Ngân sách và Việc cần làm. Giao dịch và ngân sách được lưu vào SQLite. Danh sách việc cần làm được giữ trong phiên trình duyệt.
 
 Từ thư mục gốc dự án, chạy:
 
@@ -8,7 +8,7 @@ Từ thư mục gốc dự án, chạy:
 python unispend_3d/main.py
 ```
 
-Launcher dùng Python hiện tại; nếu thiếu Streamlit, chương trình tự tìm Python trong `.venv` ở thư mục gốc. Nếu chưa cài thư viện:
+Nếu chưa cài thư viện, chạy từ thư mục gốc:
 
 ```powershell
 python -m venv .venv
@@ -20,4 +20,32 @@ Giao diện mở trên trình duyệt. Giữ Terminal mở khi dùng ứng dụn
 
 Nhập thông tin rồi bấm **Lưu giao dịch**, không cần nhấn Enter. Các nút mệnh giá nhanh giữ nguyên ghi chú đang nhập; khi dữ liệu chưa hợp lệ, biểu mẫu giữ nội dung để bạn sửa.
 
-Dữ liệu được tự khởi tạo với mẫu bốn tháng gần nhất trong `unispend_3d/data/student_expense.db`. Đây là tệp dữ liệu riêng; không dùng hoặc chuyển cơ sở dữ liệu của giao diện ở thư mục gốc. Gói mã nguồn không kèm dữ liệu hay cache từ máy đang chạy.
+Lần đầu khởi tạo, UniSpend tạo dữ liệu mẫu bốn tháng trong `unispend_3d/data/student_expense.db`. Dùng `--db` để chọn tệp riêng hoặc mở cơ sở dữ liệu UniSpend có sẵn:
+
+```powershell
+python unispend_3d/main.py --db 'D:\du-lieu\student_expense.db'
+```
+
+## FastAPI
+
+Mở một terminal khác để chạy API song song với giao diện:
+
+```powershell
+python unispend_3d/main.py --api
+```
+
+Mở [Swagger UI](http://127.0.0.1:8000/docs) để thử các endpoint. FastAPI và Streamlit dùng chung tệp SQLite. Nếu chọn tệp bằng `--db`, hãy truyền cùng đường dẫn cho cả hai lệnh.
+
+| Endpoint | Chức năng |
+| --- | --- |
+| `GET /health` | Kiểm tra máy chủ API |
+| `GET /api/months` | Liệt kê tháng báo cáo |
+| `GET /api/categories?tx_type=Chi tiêu` | Liệt kê danh mục theo loại giao dịch |
+| `GET /api/transactions` | Xem giao dịch và lọc theo `month`, `tx_type`, `category`, `q` (ghi chú) |
+| `POST /api/transactions` | Tạo giao dịch và trả về mã giao dịch |
+| `DELETE /api/transactions/{transaction_id}` | Xóa giao dịch |
+| `GET /api/dashboard/{month}` | Xem tổng thu chi, ngân sách và cảnh báo |
+| `GET /api/charts/{month}` | Lấy dữ liệu biểu đồ |
+| `GET` hoặc `PUT /api/budgets/{month}` | Xem hoặc lưu tổng ngân sách và toàn bộ định mức danh mục |
+
+Tháng sử dụng định dạng `YYYY-MM`. Với `PUT`, có thể lấy JSON từ `GET`, bỏ trường `month`, chỉnh các giá trị cần thiết rồi gửi lại.
