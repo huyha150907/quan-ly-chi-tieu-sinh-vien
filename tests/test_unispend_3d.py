@@ -1,4 +1,4 @@
-"""Kiểm thử nhập liệu UniSpend 3D bằng cơ sở dữ liệu tạm."""
+"""Kiểm thử giao diện UTH bằng cơ sở dữ liệu tạm."""
 
 import gc
 import importlib
@@ -38,9 +38,10 @@ class UniSpend3dInputTests(unittest.TestCase):
         self.assertEqual(list(self.app.exception), [])
 
     def save(self):
-        buttons = [button for button in self.app.sidebar.button if button.label == "💾 Lưu Giao Dịch Ngay"]
-        self.assertEqual(len(buttons), 1)
-        buttons[0].click().run()
+        self.click("Nhập khoản giao dịch")
+
+    def click(self, label):
+        next(button for button in self.app.button if button.label == label).click().run()
         self.assert_no_exception()
 
     def saved_record(self, note):
@@ -55,10 +56,10 @@ class UniSpend3dInputTests(unittest.TestCase):
         return frames[0]
 
     def test_direct_save_commits_current_fields_and_opens_saved_month(self):
-        self.app.date_input(key="quick_date").set_value(date(2025, 12, 31))
-        self.app.selectbox(key="quick_category_expense").select("Đi lại")
-        self.app.number_input(key="quick_amount").set_value(76_543)
-        self.app.text_input(key="quick_note").set_value("Vé xe nhập trực tiếp")
+        self.app.date_input(key="tx_date").set_value(date(2025, 12, 31))
+        self.app.selectbox(key="tx_category").select("Đi lại")
+        self.app.number_input(key="tx_amount").set_value(76_543)
+        self.app.text_input(key="tx_note").set_value("Vé xe nhập trực tiếp")
         self.save()
 
         record = self.saved_record("Vé xe nhập trực tiếp")
@@ -68,30 +69,17 @@ class UniSpend3dInputTests(unittest.TestCase):
         self.assertEqual(self.ledger_frame()["id"].tolist(), [record["id"]])
         self.assertTrue(any("thành công" in notice.value for notice in self.app.success))
 
-    def test_quick_amount_buttons_preserve_draft_and_save_selected_amount(self):
-        for amount in (35_000, 50_000, 200_000):
-            with self.subTest(amount=amount):
-                note = f"Khoản chọn nhanh {amount}"
-                self.app.selectbox(key="quick_category_expense").select("Tiền trọ")
-                self.app.number_input(key="quick_amount").set_value(99_999)
-                self.app.text_input(key="quick_note").set_value(note)
-                self.app.button(key=f"quick_{amount}").click().run()
-                self.assert_no_exception()
-                self.assertEqual(self.app.text_input(key="quick_note").value, note)
-                self.assertEqual(self.app.selectbox(key="quick_category_expense").value, "Tiền trọ")
-                self.assertEqual(self.app.number_input(key="quick_amount").value, amount)
-                self.save()
-                record = self.saved_record(note)
-                self.assertEqual((record["amount"], record["category"]), (amount, "Tiền trọ"))
+    def test_original_tabs_and_wallet_image_are_available(self):
+        self.assertEqual([tab.label for tab in self.app.tabs],
+                         ["Tổng quan", "Thu chi", "Biểu đồ & Ngân sách", "Việc cần làm"])
+        self.assertTrue(any("data:image/jpeg;base64," in str(element.proto) for element in self.app.get("html")))
 
-    def test_changing_to_income_uses_income_category_and_preserves_typed_note(self):
-        self.app.selectbox(key="quick_category_expense").select("Đi lại")
-        self.app.text_input(key="quick_note").set_value("Lương ca tối")
-        self.app.radio(key="sidebar_tx_type").set_value("Thu nhập").run()
+    def test_selecting_income_uses_income_category(self):
+        self.app.radio[0].set_value("Thu nhập").run()
         self.assert_no_exception()
-        self.assertEqual(self.app.text_input(key="quick_note").value, "Lương ca tối")
-        self.app.selectbox(key="quick_category_income").select("Làm thêm (Part-time)")
-        self.app.number_input(key="quick_amount").set_value(180_001)
+        self.app.selectbox(key="tx_category").select("Làm thêm (Part-time)")
+        self.app.text_input(key="tx_note").set_value("Lương ca tối")
+        self.app.number_input(key="tx_amount").set_value(180_001)
         self.save()
         record = self.saved_record("Lương ca tối")
         self.assertEqual((record["tx_type"], record["category"], record["amount"]),
@@ -99,13 +87,13 @@ class UniSpend3dInputTests(unittest.TestCase):
 
     def test_invalid_zero_keeps_draft_without_writing(self):
         count = len(self.backend.db.get_transactions_df())
-        self.app.number_input(key="quick_amount").set_value(0)
-        self.app.text_input(key="quick_note").set_value("Giữ ghi chú khi nhập sai")
+        self.app.number_input(key="tx_amount").set_value(0)
+        self.app.text_input(key="tx_note").set_value("Giữ ghi chú khi nhập sai")
         self.save()
         self.assertEqual(len(self.backend.db.get_transactions_df()), count)
         self.assertTrue(any("lớn hơn 0" in error.value for error in self.app.error))
-        self.assertEqual(self.app.text_input(key="quick_note").value, "Giữ ghi chú khi nhập sai")
-        self.app.number_input(key="quick_amount").set_value(65_555)
+        self.assertEqual(self.app.text_input(key="tx_note").value, "Giữ ghi chú khi nhập sai")
+        self.app.number_input(key="tx_amount").set_value(65_555)
         self.save()
         self.assertEqual(self.saved_record("Giữ ghi chú khi nhập sai")["amount"], 65_555)
 
@@ -122,20 +110,16 @@ class UniSpend3dInputTests(unittest.TestCase):
                 self.assert_no_exception()
                 self.assertEqual(self.ledger_frame()["note"].tolist(), [expected_note])
 
-    def test_simulator_uses_actual_expenses_below_and_above_original_ranges(self):
-        expected = [0, 0, 0]
-        for index, (category, amount) in enumerate((("Tiền ăn", 45_000),
-                                                     ("Tiền trọ", 6_000_000),
-                                                     ("Đi lại", 3_000_000))):
-            with self.subTest(category=category):
-                self.app.date_input(key="quick_date").set_value(date(2020, 1, 15))
-                self.app.selectbox(key="quick_category_expense").select(category)
-                self.app.number_input(key="quick_amount").set_value(amount)
-                self.app.text_input(key="quick_note").set_value(f"Kiểm tra giả lập {category}")
-                self.save()
-                expected[index] = amount
-                self.assertEqual(self.app.selectbox(key="report_month").value, "2020-01")
-                self.assertEqual([slider.value for slider in self.app.slider], expected)
+    def test_budget_changes_apply_to_selected_month(self):
+        picker = self.app.selectbox(key="report_month")
+        month, other_month = picker.options[:2]
+        other_budget = self.backend.db.get_budget_config(other_month)
+        self.app.number_input(key=f"budget_total_{month}").set_value(6_000_000)
+        self.app.number_input(key=f"canva_lim_{month}_Tiền ăn").set_value(1_800_000)
+        self.click("Lưu định mức ngân sách")
+        budget = self.backend.db.get_budget_config(month)
+        self.assertEqual((budget.total_budget, budget.category_limits["Tiền ăn"]), (6_000_000, 1_800_000))
+        self.assertEqual(self.backend.db.get_budget_config(other_month), other_budget)
 
 
 if __name__ == "__main__":

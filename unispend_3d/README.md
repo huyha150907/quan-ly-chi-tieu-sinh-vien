@@ -1,6 +1,6 @@
 # UniSpend
 
-Giao diện quản lý chi tiêu sinh viên gồm Tổng quan, Sổ thu chi, Biểu đồ, Ngân sách và Việc cần làm. Giao dịch và ngân sách được lưu vào SQLite. Danh sách việc cần làm được giữ trong phiên trình duyệt.
+Giao diện UTH gồm bốn tab Tổng quan, Thu chi, Biểu đồ & Ngân sách và Việc cần làm. Giao dịch và ngân sách được lưu vào SQLite. Danh sách việc cần làm được giữ trong phiên trình duyệt.
 
 Từ thư mục gốc dự án, chạy:
 
@@ -18,7 +18,7 @@ python -m venv .venv
 
 Giao diện mở trên trình duyệt. Giữ Terminal mở khi dùng ứng dụng; nhấn **Ctrl+C** để dừng.
 
-Nhập thông tin rồi bấm **Lưu giao dịch**, không cần nhấn Enter. Các nút mệnh giá nhanh giữ nguyên ghi chú đang nhập; khi dữ liệu chưa hợp lệ, biểu mẫu giữ nội dung để bạn sửa.
+Trong tab **Thu chi**, điền thông tin rồi bấm **Nhập khoản giao dịch**. Sau khi lưu, ứng dụng mở báo cáo của tháng giao dịch.
 
 Lần đầu khởi tạo, UniSpend tạo dữ liệu mẫu bốn tháng trong `unispend_3d/data/student_expense.db`. Dùng `--db` để chọn tệp riêng hoặc mở cơ sở dữ liệu UniSpend có sẵn:
 

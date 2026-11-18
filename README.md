@@ -25,14 +25,14 @@ Chế độ thường dùng `data/expenses.db`, ban đầu chưa có giao dịch
 
 ### Giao diện UniSpend và FastAPI
 
-Giao diện UniSpend có sổ thu chi, biểu đồ, ngân sách và danh sách việc cần làm. Chạy từ thư mục dự án:
+Giao diện UTH có ảnh ví, sổ thu chi, biểu đồ, ngân sách và danh sách việc cần làm. Chạy lệnh đầu trong terminal để mở giao diện, và lệnh thứ hai trong terminal riêng để chạy FastAPI:
 
 ```powershell
 python unispend_3d/main.py
 python unispend_3d/main.py --api
 ```
 
-Chạy lệnh API trong terminal riêng, sau đó mở [Swagger UI](http://127.0.0.1:8000/docs). Xem hướng dẫn chọn tệp SQLite và danh sách endpoint trong [tài liệu UniSpend](unispend_3d/README.md).
+Sau khi chạy API, mở [Swagger UI](http://127.0.0.1:8000/docs). Xem hướng dẫn chọn tệp SQLite và danh sách endpoint trong [tài liệu UniSpend](unispend_3d/README.md).
 
 ## 2. Hướng dẫn sử dụng
 
