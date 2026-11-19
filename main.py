@@ -8,10 +8,17 @@ from pathlib import Path
 
 
 def main():
+    args = sys.argv[1:]
+    if not args or "--api" in args:
+        from unispend_3d.main import main as run_uth
+
+        return run_uth()
+
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
-    parser = argparse.ArgumentParser(description="Ứng dụng quản lý chi tiêu sinh viên")
+    parser = argparse.ArgumentParser(description="UniSpend UTH (mặc định). Dùng --api để chạy FastAPI.")
+    parser.add_argument("--legacy", action="store_true", help="Mở giao diện cũ với dữ liệu ở thư mục data")
     parser.add_argument("--demo", action="store_true", help="Mở dữ liệu mẫu tách riêng")
     parser.add_argument("--db", type=Path, help="Đường dẫn tới tệp SQLite khác")
     args = parser.parse_args()

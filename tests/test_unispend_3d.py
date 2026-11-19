@@ -121,6 +121,37 @@ class UniSpend3dInputTests(unittest.TestCase):
         self.assertEqual((budget.total_budget, budget.category_limits["Tiền ăn"]), (6_000_000, 1_800_000))
         self.assertEqual(self.backend.db.get_budget_config(other_month), other_budget)
 
+    def test_csv_import_preserves_amounts_and_skips_report_totals(self):
+        csv = (
+            "Ngày giao dịch,Loại giao dịch,Danh mục,Số tiền (VNĐ),Ghi chú chi tiết\n"
+            "15/01/2024,Chi tiêu,Tiền ăn,35000.0,Cơm CSV\n"
+            "16/01/2024,Thu nhập,Trợ cấp gia đình,150.000,Thu CSV\n"
+            ",TỔNG CHI,,35000,\n"
+        )
+        self.app.file_uploader(key="import_csv_uploader_0").upload(
+            "giao-dich.csv", csv.encode("utf-8-sig"), "text/csv"
+        ).run()
+        self.click("✅ Xác nhận nhập vào sổ")
+        self.assertEqual(self.saved_record("Cơm CSV")["amount"], 35_000)
+        self.assertEqual(self.saved_record("Thu CSV")["amount"], 150_000)
+        self.assertEqual(len(self.ledger_frame()), 2)
+        self.assertEqual(self.app.selectbox(key="report_month").value, "2024-01")
+
+    def test_invalid_csv_row_keeps_entire_batch_out_of_database(self):
+        csv = (
+            "date,tx_type,category,amount\n"
+            "2024-01-15,Chi tiêu,Tiền ăn,35000\n"
+            "2024-01-16,Chi tiêu,Tiền ăn,không rõ\n"
+        )
+        count = len(self.backend.db.get_transactions_df())
+        self.app.file_uploader(key="import_csv_uploader_0").upload(
+            "giao-dich.csv", csv.encode(), "text/csv"
+        ).run()
+        self.assert_no_exception()
+        self.assertTrue(any("Dòng 3" in error.value for error in self.app.error))
+        self.assertFalse(any("Xác nhận nhập" in button.label for button in self.app.button))
+        self.assertEqual(len(self.backend.db.get_transactions_df()), count)
+
 
 if __name__ == "__main__":
     unittest.main()

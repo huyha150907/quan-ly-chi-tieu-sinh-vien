@@ -12,29 +12,31 @@ python -m venv .venv
 .venv\Scripts\python.exe main.py
 ```
 
-Nếu đã kích hoạt môi trường có đủ thư viện, chạy `python main.py`. Chương trình khởi động máy chủ Streamlit và mở giao diện trong trình duyệt. Giữ Terminal mở trong khi sử dụng; nhấn **Ctrl+C** ở Terminal để dừng.
+`python main.py` hoặc `RUN.bat` mở giao diện UTH có ảnh ví và nút nhập CSV trong tab **Thu chi**. Giữ Terminal mở khi sử dụng. Nhấn **Ctrl+C** để dừng.
 
-Mở dữ liệu mẫu hoặc chọn tệp dữ liệu khác:
+Với dữ liệu từ giao diện UniSpend đời trước, dùng `python main.py --legacy`. Hai lệnh sau dành cho dữ liệu của giao diện đó:
 
 ```powershell
 .venv\Scripts\python.exe main.py --demo
 .venv\Scripts\python.exe main.py --db data/bai_thuyet_trinh.db
 ```
 
-Chế độ thường dùng `data/expenses.db`, ban đầu chưa có giao dịch. Chế độ mẫu dùng `data/demo.db` riêng, có dữ liệu tháng hiện tại và năm tháng trước. Mở lại chế độ mẫu không chèn trùng dữ liệu; các chỉnh sửa được lưu trong tệp mẫu. Không dùng đồng thời `--demo` và `--db`.
+Giao diện đời trước dùng `data/expenses.db`, ban đầu chưa có giao dịch. Chế độ mẫu dùng `data/demo.db` riêng, có dữ liệu tháng hiện tại và năm tháng trước. Mở lại chế độ mẫu không chèn trùng dữ liệu; các chỉnh sửa được lưu trong tệp mẫu. Không dùng đồng thời `--demo` và `--db`.
 
 ### Giao diện UniSpend và FastAPI
 
 Giao diện UTH có ảnh ví, sổ thu chi, biểu đồ, ngân sách và danh sách việc cần làm. Chạy lệnh đầu trong terminal để mở giao diện, và lệnh thứ hai trong terminal riêng để chạy FastAPI:
 
 ```powershell
-python unispend_3d/main.py
-python unispend_3d/main.py --api
+python main.py
+python main.py --api
 ```
 
 Sau khi chạy API, mở [Swagger UI](http://127.0.0.1:8000/docs). Xem hướng dẫn chọn tệp SQLite và danh sách endpoint trong [tài liệu UniSpend](unispend_3d/README.md).
 
-## 2. Hướng dẫn sử dụng
+Trên Streamlit Community Cloud, chọn nhánh `main` và tệp chạy `app.py`. Bản triển khai tạo dữ liệu mẫu riêng.
+
+## 2. Hướng dẫn sử dụng giao diện đời trước
 
 **Thanh bên:** chọn tháng báo cáo và nhập nhanh giao dịch. Chọn loại thu/chi, danh mục, ngày, số tiền và ghi chú rồi lưu. Tháng chưa có dữ liệu có tổng thu, tổng chi bằng 0.
 

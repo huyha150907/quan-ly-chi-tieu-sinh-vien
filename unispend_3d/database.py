@@ -191,6 +191,14 @@ class ExpenseDatabase:
             """, (tx.date, tx.tx_type, tx.category, tx.amount, tx.note.strip()))
             return cursor.lastrowid, "Đã lưu giao dịch thành công!"
 
+    def insert_transactions(self, transactions: list[Transaction]) -> None:
+        """Lưu toàn bộ lô đã kiểm tra trong một giao dịch SQLite."""
+        with closing(self._get_conn()) as conn, conn:
+            conn.executemany("""
+                INSERT INTO transactions (date, tx_type, category, amount, note)
+                VALUES (?, ?, ?, ?, ?)
+            """, [(tx.date, tx.tx_type, tx.category, tx.amount, tx.note) for tx in transactions])
+
     def delete_transaction(self, tx_id: int) -> bool:
         """Xóa một giao dịch theo ID."""
         with closing(self._get_conn()) as conn, conn:

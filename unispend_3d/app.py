@@ -17,17 +17,26 @@ Tái hiện trung thực phong cách thiết kế của file Canva "UniSpend 3D"
 
 import base64
 import os
+from csv import Error as CsvError
 from datetime import date
 from html import escape
+from sqlite3 import Error as DatabaseError
 import pandas as pd
 import altair as alt
 import streamlit as st
 import streamlit.components.v1 as components
 
 # LIÊN KẾT QUA PHẦN BACKEND BÊN IDE
-from backend import ExpenseBackend
-from database import database_path
-from models import EXPENSE_CATEGORIES
+if __package__:
+    from .backend import ExpenseBackend
+    from .csv_import import read_transactions_csv
+    from .database import database_path
+    from .models import EXPENSE_CATEGORIES
+else:
+    from backend import ExpenseBackend
+    from csv_import import read_transactions_csv
+    from database import database_path
+    from models import EXPENSE_CATEGORIES
 
 
 # =============================================================================
@@ -549,7 +558,7 @@ with tab_tong_quan:
 # MÀN HÌNH 2: THU CHI (BỐ CỤC 2 CỘT CHUẨN PAGE 2 CANVA)
 # =============================================================================
 with tab_thu_chi:
-    tc_left, tc_right = st.columns([0.95, 1.5], gap="large")
+    tc_left, tc_right = st.columns([0.85, 1.65], gap="large")
 
     with tc_left:
         st.html("""
@@ -604,44 +613,128 @@ with tab_thu_chi:
             st.success(f"✅ {saved_notice}")
 
     with tc_right:
-        st.html('<div class="canva-card" style="padding: 18px 22px 8px 22px; margin-bottom: 12px;"><div style="font-size:17px; font-weight:700; color:#0B1938;">Sổ nhật ký giao dịch tháng ' + selected_month + '</div></div>')
+        st.html(f'<div class="canva-card" style="padding: 16px 22px; margin-bottom: 12px;"><div style="font-size:18px; font-weight:800; color:#0B1938;">📊 Sổ nhật ký & Thống kê giao dịch tháng {m_str}/{y_str}</div></div>')
 
-        f1, f2, f3 = st.columns([1.1, 1.5, 1])
+        f1, f2, f3, f4, f5 = st.columns([0.95, 0.95, 1.2, 0.95, 0.95])
         with f1:
             f_type = st.selectbox("Lọc loại:", ["Tất cả", "Chi tiêu", "Thu nhập"])
         with f2:
-            f_kw = st.text_input("Tìm ghi chú:", placeholder="Tìm kiếm nhanh...", key="ledger_search")
+            cat_opts = ["Tất cả"] + sorted(df_month["category"].unique().tolist()) if not df_month.empty else ["Tất cả"]
+            f_cat = st.selectbox("Lọc danh mục:", cat_opts)
         with f3:
+            f_kw = st.text_input("Tìm ghi chú:", placeholder="VD: cơm, xăng, tiền trọ...", key="ledger_search")
+        with f4:
             st.write("")
-            if not df_month.empty:
-                csv_bytes = df_month.to_csv(index=False).encode("utf-8-sig")
+            df_show = df_month.copy()
+            if f_type != "Tất cả":
+                df_show = df_show[df_show["tx_type"] == f_type]
+            if f_cat != "Tất cả":
+                df_show = df_show[df_show["category"] == f_cat]
+            if f_kw.strip():
+                df_show = df_show[df_show["note"].str.contains(f_kw.strip(), case=False, na=False, regex=False)]
+
+            if not df_show.empty:
+                df_export = df_show.sort_values(by=["date", "id"], ascending=[True, True]).reset_index(drop=True)
+                df_export.insert(0, "STT", range(1, len(df_export) + 1))
+                df_export["Ngày giao dịch"] = pd.to_datetime(df_export["date"]).dt.strftime("%d/%m/%Y")
+                df_export["Số tiền (VNĐ)"] = df_export["amount"].astype(int)
+                df_csv = df_export[["STT", "id", "Ngày giao dịch", "tx_type", "category", "Số tiền (VNĐ)", "note"]].rename(
+                    columns={
+                        "id": "Mã GD",
+                        "tx_type": "Loại giao dịch",
+                        "category": "Danh mục",
+                        "note": "Ghi chú chi tiết",
+                    }
+                )
+                exp_thu = int(df_show[df_show["tx_type"] == "Thu nhập"]["amount"].sum())
+                exp_chi = int(df_show[df_show["tx_type"] == "Chi tiêu"]["amount"].sum())
+                summary_rows = pd.DataFrame([
+                    {"STT": "", "Mã GD": "", "Ngày giao dịch": "", "Loại giao dịch": "TỔNG THU", "Danh mục": "", "Số tiền (VNĐ)": exp_thu, "Ghi chú chi tiết": f"Tổng cộng thu nhập ({len(df_show[df_show['tx_type']=='Thu nhập'])} khoản)"},
+                    {"STT": "", "Mã GD": "", "Ngày giao dịch": "", "Loại giao dịch": "TỔNG CHI", "Danh mục": "", "Số tiền (VNĐ)": exp_chi, "Ghi chú chi tiết": f"Tổng cộng chi tiêu ({len(df_show[df_show['tx_type']=='Chi tiêu'])} khoản)"},
+                    {"STT": "", "Mã GD": "", "Ngày giao dịch": "", "Loại giao dịch": "CHÊNH LỆCH", "Danh mục": "", "Số tiền (VNĐ)": exp_thu - exp_chi, "Ghi chú chi tiết": "Tổng Thu - Tổng Chi"},
+                ])
+                df_csv_full = pd.concat([df_csv, summary_rows], ignore_index=True)
+                csv_bytes = df_csv_full.to_csv(index=False).encode("utf-8-sig")
                 st.download_button(
                     "📥 Xuất CSV",
                     data=csv_bytes,
-                    file_name=f"unispend_{selected_month}.csv",
+                    file_name=f"UTH_chi_tieu_{selected_month}.csv",
                     mime="text/csv",
                     use_container_width=True
                 )
+        with f5:
+            st.write("")
+            with st.popover("📤 Nhập dữ liệu", use_container_width=True):
+                st.markdown("**Nhập hàng loạt từ file CSV**")
+                st.caption("Hỗ trợ file CSV xuất từ ứng dụng hoặc file có cột: `Ngày giao dịch`, `Loại giao dịch`, `Danh mục`, `Số tiền (VNĐ)`, `Ghi chú chi tiết`.")
+                upload_id = st.session_state.get("transaction_csv_upload_id", 0)
+                uploaded_csv = st.file_uploader("Chọn file CSV:", type=["csv"], key=f"import_csv_uploader_{upload_id}")
+                if uploaded_csv is not None:
+                    try:
+                        transactions = read_transactions_csv(uploaded_csv.getvalue())
+                    except (ValueError, CsvError) as exc:
+                        st.error(f"Không đọc được file CSV: {exc}")
+                    else:
+                        if not transactions:
+                            st.info("Tệp CSV chưa có giao dịch.")
+                        else:
+                            st.info(f"Tìm thấy **{len(transactions)}** giao dịch hợp lệ.")
+                            if st.button("✅ Xác nhận nhập vào sổ", type="primary", use_container_width=True):
+                                try:
+                                    backend.db.insert_transactions(transactions)
+                                except DatabaseError:
+                                    st.error("Chưa lưu được giao dịch. Hãy thử lại.")
+                                else:
+                                    st.session_state["transaction_csv_upload_id"] = upload_id + 1
+                                    st.session_state["report_month_after_save"] = max(tx.month_key for tx in transactions)
+                                    st.session_state["csv_import_count"] = len(transactions)
+                                    st.rerun()
 
-        df_show = df_month.copy()
-        if f_type != "Tất cả":
-            df_show = df_show[df_show["tx_type"] == f_type]
-        if f_kw.strip():
-            df_show = df_show[df_show["note"].str.contains(f_kw.strip(), case=False, na=False, regex=False)]
+        if imported := st.session_state.pop("csv_import_count", None):
+            st.success(f"Đã nhập thành công {imported} giao dịch.")
 
         if not df_show.empty:
+            sum_thu = float(df_show[df_show["tx_type"] == "Thu nhập"]["amount"].sum())
+            sum_chi = float(df_show[df_show["tx_type"] == "Chi tiêu"]["amount"].sum())
+            sum_diff = sum_thu - sum_chi
+            st.html(f"""
+            <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:10px; margin:8px 0 12px 0;">
+                <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:14px; padding:10px 14px;">
+                    <div style="font-size:11px; color:#64748B; font-weight:600;">Số dòng hiển thị</div>
+                    <div style="font-size:17px; font-weight:800; color:#0B1938;">{len(df_show)} khoản</div>
+                </div>
+                <div style="background:#F0FDF4; border:1px solid #BBF7D0; border-radius:14px; padding:10px 14px;">
+                    <div style="font-size:11px; color:#15803D; font-weight:600;">Tổng Thu (lọc)</div>
+                    <div style="font-size:17px; font-weight:800; color:#16A34A;">{format_vnd(sum_thu)}</div>
+                </div>
+                <div style="background:#FEF2F2; border:1px solid #FECACA; border-radius:14px; padding:10px 14px;">
+                    <div style="font-size:11px; color:#B91C1C; font-weight:600;">Tổng Chi (lọc)</div>
+                    <div style="font-size:17px; font-weight:800; color:#DC2626;">{format_vnd(sum_chi)}</div>
+                </div>
+                <div style="background:#EDE9FE; border:1px solid #DDD6FE; border-radius:14px; padding:10px 14px;">
+                    <div style="font-size:11px; color:#5B21B6; font-weight:600;">Chênh lệch</div>
+                    <div style="font-size:17px; font-weight:800; color:#6328E8;">{format_vnd(sum_diff)}</div>
+                </div>
+            </div>
+            """)
+
+            df_display = df_show.copy()
+            df_display["Ngày"] = pd.to_datetime(df_display["date"]).dt.strftime("%d/%m/%Y")
+            df_display["Loại"] = df_display["tx_type"].map({"Chi tiêu": "🔴 Chi tiêu", "Thu nhập": "🟢 Thu nhập"})
+            df_display["Số tiền"] = df_display["amount"].apply(format_vnd)
+
             st.dataframe(
-                df_show[["id", "date", "category", "note", "tx_type", "amount"]],
+                df_display[["id", "Ngày", "Loại", "category", "Số tiền", "note"]],
                 use_container_width=True,
                 hide_index=True,
-                height=340,
+                height=420,
                 column_config={
                     "id": st.column_config.NumberColumn("Mã", width="small"),
-                    "date": st.column_config.TextColumn("Ngày"),
-                    "category": st.column_config.TextColumn("Danh mục"),
-                    "note": st.column_config.TextColumn("Ghi chú", width="medium"),
-                    "tx_type": st.column_config.TextColumn("Loại"),
-                    "amount": st.column_config.NumberColumn("Số tiền", format="%d đ"),
+                    "Ngày": st.column_config.TextColumn("Ngày", width="small"),
+                    "Loại": st.column_config.TextColumn("Loại", width="small"),
+                    "category": st.column_config.TextColumn("Danh mục", width="medium"),
+                    "Số tiền": st.column_config.TextColumn("Số tiền", width="small"),
+                    "note": st.column_config.TextColumn("Ghi chú chi tiết", width="large"),
                 }
             )
             with st.expander("🗑️ Xóa giao dịch nhập nhầm hoặc nạp lại dữ liệu mẫu"):
@@ -725,6 +818,28 @@ with tab_bieu_do:
             .properties(height=270, title="Biến động Tiền ăn • Tiền trọ • Đi lại qua các tháng")
         )
         st.altair_chart(line_c3, use_container_width=True)
+
+    st.markdown("---")
+    st.markdown(f"#### 📋 Bảng thống kê chi tiết từng danh mục tháng {m_str}/{y_str}")
+    if not df_category_summary.empty:
+        st.dataframe(
+            df_category_summary,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Đã chi (VNĐ)": st.column_config.NumberColumn(format="%d đ"),
+                "Định mức (VNĐ)": st.column_config.NumberColumn(format="%d đ"),
+                "Tỷ lệ dùng (%)": st.column_config.ProgressColumn("Tiến độ (%)", format="%.1f%%", min_value=0, max_value=120),
+                "Tỷ trọng (%)": st.column_config.NumberColumn(format="%.1f%%"),
+            }
+        )
+        cat_csv = df_category_summary.to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            "📥 Xuất CSV Thống kê theo Danh mục",
+            data=cat_csv,
+            file_name=f"UTH_thong_ke_danh_muc_{selected_month}.csv",
+            mime="text/csv"
+        )
 
     st.markdown("---")
     b_left, b_right = st.columns([1.15, 1], gap="large")

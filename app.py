@@ -1,12 +1,18 @@
 """Trang Streamlit; có thể chạy trực tiếp hoặc thông qua main.py."""
 
 import argparse
+import runpy
+import sys
 from pathlib import Path
 
 from expense_tracker.ui import run_app
 
 
 def main():
+    if len(sys.argv) == 1:
+        runpy.run_module("unispend_3d.app", run_name="__main__")
+        return
+
     parser = argparse.ArgumentParser(description="UniSpend — Quản lý chi tiêu sinh viên")
     parser.add_argument("--demo", action="store_true")
     parser.add_argument("--db", type=Path)
