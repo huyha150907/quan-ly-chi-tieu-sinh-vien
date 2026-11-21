@@ -1,6 +1,6 @@
 # UniSpend
 
-Giao diện UTH Spend có thanh bên với bốn mục Lịch tài chính, Thống kê chi tiêu, Nhập Thu / Chi & CSV và Cảnh báo & Ngân sách. Giao dịch và ngân sách được lưu vào SQLite.
+Giao diện UTH Spend có tám mục ở thanh bên gồm Lịch tài chính, Hóa đơn & Sổ nợ, Kho ảnh hóa đơn, Thống kê chi tiêu, AI Làm sạch dữ liệu, Quét hóa đơn AI, Nhập giọng nói và Cá nhân & Tài khoản. Giao dịch và ngân sách được lưu vào SQLite.
 
 Từ thư mục gốc dự án, chạy:
 
@@ -18,9 +18,11 @@ python -m venv .venv
 
 Giao diện mở trên trình duyệt. Giữ Terminal mở khi dùng ứng dụng; nhấn **Ctrl+C** để dừng.
 
-Trong mục **Nhập Thu / Chi & CSV**, điền thông tin rồi bấm **Nhập khoản giao dịch**. Sau khi lưu, ứng dụng mở báo cáo của tháng giao dịch.
+Trong **Lịch tài chính**, chọn ngày rồi mở **Quick Add — Ghi nhanh**, điền thông tin và bấm **Lưu ngay**. Sau khi lưu, ứng dụng mở báo cáo của tháng giao dịch.
 
-Để nạp nhiều giao dịch, vào **Nhập Thu / Chi & CSV → Nhập giao dịch từ CSV**. Chọn tệp CSV UTF-8, kiểm tra tối đa 5 giao dịch trong phần xem trước rồi bấm **Xác nhận nhập vào sổ**. Bạn có thể dùng tệp xuất từ ứng dụng hoặc CSV có các cột `Ngày`, `Loại`, `Danh mục`, `Số tiền (VNĐ)` và cột `Ghi chú` tùy chọn. Nếu một dòng sai, ứng dụng báo số dòng để bạn sửa trước khi lưu cả lô.
+Để nạp nhiều giao dịch, vào **Cá nhân & Tài khoản → Sổ giao dịch & Xuất/Nhập CSV → Nhập giao dịch từ CSV**. Chọn tệp CSV UTF-8, kiểm tra tối đa 5 giao dịch trong phần xem trước rồi bấm **Xác nhận nhập vào sổ**. Bạn có thể dùng tệp xuất từ ứng dụng hoặc CSV có các cột `Ngày`, `Loại`, `Danh mục`, `Số tiền (VNĐ)` và cột `Ghi chú` tùy chọn. Nếu một dòng sai, ứng dụng báo số dòng để bạn sửa trước khi lưu cả lô.
+
+Quét hóa đơn và nhập giọng nói hỗ trợ chụp ảnh, thu âm và phân tích nội dung chữ bạn nhập. Kho ảnh và sổ nợ được lưu cạnh tệp SQLite. Trên bản web công khai, mọi người dùng chung một sổ và kho ảnh. Dữ liệu tải lên cần phù hợp với chế độ dùng chung.
 
 Lần đầu khởi tạo, UniSpend tạo dữ liệu mẫu bốn tháng trong `unispend_3d/data/student_expense.db`. Dùng `--db` để chọn tệp riêng hoặc mở cơ sở dữ liệu UniSpend có sẵn:
 

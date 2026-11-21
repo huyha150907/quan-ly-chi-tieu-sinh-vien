@@ -21,11 +21,15 @@ class UniSpend3dInputTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.addCleanup(gc.collect)
+        db_path = str(Path(self.directory.name) / "ui_3d.db")
+        env_patch = patch.dict("os.environ", {"UNISPEND_DB": db_path})
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
         self.path_patch = patch.object(sys, "path", [str(APP_DIRECTORY), *sys.path])
         self.path_patch.start()
         self.addCleanup(self.path_patch.stop)
         backend_module = importlib.import_module("backend")
-        self.backend = backend_module.ExpenseBackend(str(Path(self.directory.name) / "ui_3d.db"))
+        self.backend = backend_module.ExpenseBackend(db_path)
         self.backend_patch = patch.object(backend_module, "ExpenseBackend", lambda _path: self.backend)
         self.backend_patch.start()
         self.addCleanup(self.backend_patch.stop)
@@ -33,17 +37,16 @@ class UniSpend3dInputTests(unittest.TestCase):
         self.addCleanup(st.cache_resource.clear)
         self.app = AppTest.from_file(str(APP_DIRECTORY / "app.py"), default_timeout=30).run()
         self.assert_no_exception()
-        self.open_page("Nhập Thu / Chi & CSV")
 
     def open_page(self, page):
-        self.app.radio(key="nav_page").set_value(page).run()
+        self.app.radio(key="sidebar_nav_radio").set_value(page).run()
         self.assert_no_exception()
 
     def assert_no_exception(self):
         self.assertEqual(list(self.app.exception), [])
 
     def save(self):
-        self.click("Nhập khoản giao dịch")
+        self.click("💾 Lưu ngay")
 
     def click(self, label):
         next(button for button in self.app.button if button.label == label).click().run()
@@ -61,36 +64,41 @@ class UniSpend3dInputTests(unittest.TestCase):
         return frames[0]
 
     def test_direct_save_commits_current_fields_and_opens_saved_month(self):
-        self.app.date_input(key="tx_date").set_value(date(2025, 12, 31))
-        self.app.selectbox(key="tx_category").select("Đi lại")
-        self.app.number_input(key="tx_amount").set_value(76_543)
-        self.app.text_input(key="tx_note").set_value("Vé xe nhập trực tiếp")
+        self.app.date_input(key="finance_day").set_value(date(2025, 12, 31))
+        self.app.selectbox(key="qa_cat").select("Đi lại")
+        self.app.number_input(key="qa_amt").set_value(76_543)
+        self.app.text_input(key="qa_note").set_value("Vé xe nhập trực tiếp")
         self.save()
 
         record = self.saved_record("Vé xe nhập trực tiếp")
         self.assertEqual((record["date"], record["category"], record["amount"], record["tx_type"]),
                          ("2025-12-31", "Đi lại", 76_543, "Chi tiêu"))
         self.assertEqual(self.app.session_state["selected_month"], "2025-12")
-        self.assertEqual(self.ledger_frame()["id"].tolist(), [record["id"]])
         self.assertTrue(any("thành công" in notice.value for notice in self.app.success))
+        self.open_page("Cá nhân & Tài khoản")
+        self.assertEqual(self.ledger_frame()["id"].tolist(), [record["id"]])
 
     def test_finance_calendar_and_sidebar_navigation_are_available(self):
         self.open_page("Lịch tài chính")
-        self.assertEqual(self.app.radio(key="nav_page").value, "Lịch tài chính")
+        self.assertEqual(self.app.radio(key="sidebar_nav_radio").value, "Lịch tài chính")
         self.assertTrue(any("LỊCH TÀI CHÍNH" in str(element.proto) for element in self.app.get("html")))
         self.assertTrue(any("data:image/jpeg;base64," in str(element.proto) for element in self.app.get("html")))
-        self.open_page("Thống kê chi tiêu")
-        self.assertTrue(self.app.dataframe)
-        self.open_page("Lịch tài chính")
-        self.click("➕ Ghi nhanh")
-        self.assertEqual(self.app.radio(key="nav_page").value, "Nhập Thu / Chi & CSV")
+        for page in (
+            "Hóa đơn & Sổ nợ", "Kho ảnh hóa đơn", "Thống kê chi tiêu",
+            "AI Làm sạch dữ liệu", "Quét hóa đơn AI", "Nhập giọng nói", "Cá nhân & Tài khoản",
+        ):
+            with self.subTest(page=page):
+                self.open_page(page)
+                self.assertEqual(self.app.radio(key="sidebar_nav_radio").value, page)
+        self.click("📷 Quét hóa đơn")
+        self.assertEqual(self.app.radio(key="sidebar_nav_radio").value, "Quét hóa đơn AI")
 
     def test_selecting_income_uses_income_category(self):
-        self.app.radio(key="tx_type").set_value("Thu nhập").run()
+        self.app.selectbox(key="qa_type").set_value("Thu nhập").run()
         self.assert_no_exception()
-        self.app.selectbox(key="tx_category").select("Làm thêm (Part-time)")
-        self.app.text_input(key="tx_note").set_value("Lương ca tối")
-        self.app.number_input(key="tx_amount").set_value(180_001)
+        self.app.selectbox(key="qa_cat").select("Làm thêm (Part-time)")
+        self.app.text_input(key="qa_note").set_value("Lương ca tối")
+        self.app.number_input(key="qa_amt").set_value(180_001)
         self.save()
         record = self.saved_record("Lương ca tối")
         self.assertEqual((record["tx_type"], record["category"], record["amount"]),
@@ -98,17 +106,18 @@ class UniSpend3dInputTests(unittest.TestCase):
 
     def test_invalid_zero_keeps_draft_without_writing(self):
         count = len(self.backend.db.get_transactions_df())
-        self.app.number_input(key="tx_amount").set_value(0)
-        self.app.text_input(key="tx_note").set_value("Giữ ghi chú khi nhập sai")
+        self.app.number_input(key="qa_amt").set_value(0)
+        self.app.text_input(key="qa_note").set_value("Giữ ghi chú khi nhập sai")
         self.save()
         self.assertEqual(len(self.backend.db.get_transactions_df()), count)
         self.assertTrue(any("lớn hơn 0" in error.value for error in self.app.error))
-        self.assertEqual(self.app.text_input(key="tx_note").value, "Giữ ghi chú khi nhập sai")
-        self.app.number_input(key="tx_amount").set_value(65_555)
+        self.assertEqual(self.app.text_input(key="qa_note").value, "Giữ ghi chú khi nhập sai")
+        self.app.number_input(key="qa_amt").set_value(65_555)
         self.save()
         self.assertEqual(self.saved_record("Giữ ghi chú khi nhập sai")["amount"], 65_555)
 
     def test_search_treats_regex_characters_as_literal_text(self):
+        self.open_page("Cá nhân & Tài khoản")
         month = self.app.session_state["selected_month"]
         for note in ("Quán [cơm] giảm 10%_", "Mua vật dụng .*", "Cơm bình thường"):
             ok, message = self.backend.add_daily_transaction(month + "-01", "Chi tiêu", "Tiền ăn", 10_000, note)
@@ -122,20 +131,21 @@ class UniSpend3dInputTests(unittest.TestCase):
                 self.assertEqual(self.ledger_frame()["note"].tolist(), [expected_note])
 
     def test_budget_changes_apply_to_selected_month(self):
-        self.open_page("Cảnh báo & Ngân sách")
+        self.open_page("Cá nhân & Tài khoản")
         other_month = self.app.session_state["selected_month"]
         self.click("‹")
         month = self.app.session_state["selected_month"]
         self.assertNotEqual(month, other_month)
         other_budget = self.backend.db.get_budget_config(other_month)
         self.app.number_input(key=f"budget_total_{month}").set_value(6_000_000)
-        self.app.number_input(key=f"em_lim_{month}_Tiền ăn").set_value(1_800_000)
+        self.app.number_input(key=f"uth_lim_{month}_Tiền ăn").set_value(1_800_000)
         self.click("💾 Lưu cấu hình ngân sách")
         budget = self.backend.db.get_budget_config(month)
         self.assertEqual((budget.total_budget, budget.category_limits["Tiền ăn"]), (6_000_000, 1_800_000))
         self.assertEqual(self.backend.db.get_budget_config(other_month), other_budget)
 
     def test_csv_import_preserves_amounts_and_skips_report_totals(self):
+        self.open_page("Cá nhân & Tài khoản")
         csv = (
             "Ngày giao dịch,Loại giao dịch,Danh mục,Số tiền (VNĐ),Ghi chú chi tiết\n"
             "15/01/2024,Chi tiêu,Tiền ăn,35000.0,Cơm CSV\n"
@@ -156,6 +166,7 @@ class UniSpend3dInputTests(unittest.TestCase):
         self.assertEqual(self.app.session_state["selected_month"], "2024-01")
 
     def test_invalid_csv_row_keeps_entire_batch_out_of_database(self):
+        self.open_page("Cá nhân & Tài khoản")
         csv = (
             "date,tx_type,category,amount\n"
             "2024-01-15,Chi tiêu,Tiền ăn,35000\n"

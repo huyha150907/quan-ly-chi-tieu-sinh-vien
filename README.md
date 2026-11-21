@@ -12,7 +12,7 @@ python -m venv .venv
 .venv\Scripts\python.exe main.py
 ```
 
-`python main.py` hoặc `RUN.bat` mở giao diện UTH Spend có Lịch tài chính và mục **Nhập Thu / Chi & CSV** ở thanh bên. Giữ Terminal mở khi sử dụng. Nhấn **Ctrl+C** để dừng.
+`python main.py` hoặc `RUN.bat` mở giao diện UTH Spend với Lịch tài chính và tám mục ở thanh bên. Để nhập CSV, mở **Cá nhân & Tài khoản → Sổ giao dịch & Xuất/Nhập CSV**. Giữ Terminal mở khi sử dụng. Nhấn **Ctrl+C** để dừng.
 
 Với dữ liệu từ giao diện UniSpend đời trước, dùng `python main.py --legacy`. Hai lệnh sau dành cho dữ liệu của giao diện đó:
 
