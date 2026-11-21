@@ -1,6 +1,6 @@
 # UniSpend
 
-Giao diện UTH gồm bốn tab Tổng quan, Thu chi, Biểu đồ & Ngân sách và Việc cần làm. Giao dịch và ngân sách được lưu vào SQLite. Danh sách việc cần làm được giữ trong phiên trình duyệt.
+Giao diện UTH Spend có thanh bên với bốn mục Lịch tài chính, Thống kê chi tiêu, Nhập Thu / Chi & CSV và Cảnh báo & Ngân sách. Giao dịch và ngân sách được lưu vào SQLite.
 
 Từ thư mục gốc dự án, chạy:
 
@@ -18,9 +18,9 @@ python -m venv .venv
 
 Giao diện mở trên trình duyệt. Giữ Terminal mở khi dùng ứng dụng; nhấn **Ctrl+C** để dừng.
 
-Trong tab **Thu chi**, điền thông tin rồi bấm **Nhập khoản giao dịch**. Sau khi lưu, ứng dụng mở báo cáo của tháng giao dịch.
+Trong mục **Nhập Thu / Chi & CSV**, điền thông tin rồi bấm **Nhập khoản giao dịch**. Sau khi lưu, ứng dụng mở báo cáo của tháng giao dịch.
 
-Để nạp nhiều giao dịch, vào **Thu chi → Nhập giao dịch từ CSV**. Chọn tệp CSV UTF-8, kiểm tra tối đa 5 giao dịch trong phần xem trước rồi bấm **Xác nhận nhập vào sổ**. Bạn có thể dùng tệp xuất từ ứng dụng hoặc CSV có các cột `Ngày`, `Loại`, `Danh mục`, `Số tiền (VNĐ)` và cột `Ghi chú` tùy chọn. Nếu một dòng sai, ứng dụng báo số dòng để bạn sửa trước khi lưu cả lô.
+Để nạp nhiều giao dịch, vào **Nhập Thu / Chi & CSV → Nhập giao dịch từ CSV**. Chọn tệp CSV UTF-8, kiểm tra tối đa 5 giao dịch trong phần xem trước rồi bấm **Xác nhận nhập vào sổ**. Bạn có thể dùng tệp xuất từ ứng dụng hoặc CSV có các cột `Ngày`, `Loại`, `Danh mục`, `Số tiền (VNĐ)` và cột `Ghi chú` tùy chọn. Nếu một dòng sai, ứng dụng báo số dòng để bạn sửa trước khi lưu cả lô.
 
 Lần đầu khởi tạo, UniSpend tạo dữ liệu mẫu bốn tháng trong `unispend_3d/data/student_expense.db`. Dùng `--db` để chọn tệp riêng hoặc mở cơ sở dữ liệu UniSpend có sẵn:
 

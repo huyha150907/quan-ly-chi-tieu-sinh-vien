@@ -12,7 +12,7 @@ python -m venv .venv
 .venv\Scripts\python.exe main.py
 ```
 
-`python main.py` hoặc `RUN.bat` mở giao diện UTH có ảnh ví và nút nhập CSV trong tab **Thu chi**. Giữ Terminal mở khi sử dụng. Nhấn **Ctrl+C** để dừng.
+`python main.py` hoặc `RUN.bat` mở giao diện UTH Spend có Lịch tài chính và mục **Nhập Thu / Chi & CSV** ở thanh bên. Giữ Terminal mở khi sử dụng. Nhấn **Ctrl+C** để dừng.
 
 Với dữ liệu từ giao diện UniSpend đời trước, dùng `python main.py --legacy`. Hai lệnh sau dành cho dữ liệu của giao diện đó:
 
@@ -25,7 +25,7 @@ Giao diện đời trước dùng `data/expenses.db`, ban đầu chưa có giao 
 
 ### Giao diện UniSpend và FastAPI
 
-Giao diện UTH có ảnh ví, sổ thu chi, biểu đồ, ngân sách và danh sách việc cần làm. Chạy lệnh đầu trong terminal để mở giao diện, và lệnh thứ hai trong terminal riêng để chạy FastAPI:
+Giao diện UTH Spend có lịch tài chính, sổ thu chi, biểu đồ và ngân sách. Chạy lệnh đầu trong terminal để mở giao diện, và lệnh thứ hai trong terminal riêng để chạy FastAPI:
 
 ```powershell
 python main.py
