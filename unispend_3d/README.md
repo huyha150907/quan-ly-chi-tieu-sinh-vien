@@ -20,7 +20,7 @@ Giao diện mở trên trình duyệt. Giữ Terminal mở khi dùng ứng dụn
 
 Trong tab **Thu chi**, điền thông tin rồi bấm **Nhập khoản giao dịch**. Sau khi lưu, ứng dụng mở báo cáo của tháng giao dịch.
 
-Để nạp nhiều giao dịch, vào **Thu chi → Nhập dữ liệu**, chọn CSV UTF-8 rồi bấm **Xác nhận nhập vào sổ**. Bạn có thể dùng tệp xuất từ ứng dụng hoặc CSV có các cột `Ngày giao dịch`, `Loại giao dịch`, `Danh mục`, `Số tiền (VNĐ)` và cột `Ghi chú chi tiết` tùy chọn. Nếu một dòng sai, ứng dụng báo số dòng để bạn sửa trước khi lưu cả lô.
+Để nạp nhiều giao dịch, vào **Thu chi → Nhập giao dịch từ CSV**. Chọn tệp CSV UTF-8, kiểm tra tối đa 5 giao dịch trong phần xem trước rồi bấm **Xác nhận nhập vào sổ**. Bạn có thể dùng tệp xuất từ ứng dụng hoặc CSV có các cột `Ngày`, `Loại`, `Danh mục`, `Số tiền (VNĐ)` và cột `Ghi chú` tùy chọn. Nếu một dòng sai, ứng dụng báo số dòng để bạn sửa trước khi lưu cả lô.
 
 Lần đầu khởi tạo, UniSpend tạo dữ liệu mẫu bốn tháng trong `unispend_3d/data/student_expense.db`. Dùng `--db` để chọn tệp riêng hoặc mở cơ sở dữ liệu UniSpend có sẵn:
 

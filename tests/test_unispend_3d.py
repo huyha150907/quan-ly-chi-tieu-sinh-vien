@@ -131,6 +131,10 @@ class UniSpend3dInputTests(unittest.TestCase):
         self.app.file_uploader(key="import_csv_uploader_0").upload(
             "giao-dich.csv", csv.encode("utf-8-sig"), "text/csv"
         ).run()
+        self.assert_no_exception()
+        preview = next(table.value for table in self.app.dataframe if "Ghi chú" in table.value.columns)
+        self.assertEqual(preview["Ghi chú"].tolist(), ["Cơm CSV", "Thu CSV"])
+        self.assertFalse(self.backend.db.get_transactions_df()["note"].isin(preview["Ghi chú"]).any())
         self.click("✅ Xác nhận nhập vào sổ")
         self.assertEqual(self.saved_record("Cơm CSV")["amount"], 35_000)
         self.assertEqual(self.saved_record("Thu CSV")["amount"], 150_000)

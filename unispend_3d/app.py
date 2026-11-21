@@ -20,6 +20,7 @@ import os
 from csv import Error as CsvError
 from datetime import date
 from html import escape
+from pathlib import Path
 from sqlite3 import Error as DatabaseError
 import pandas as pd
 import altair as alt
@@ -383,6 +384,7 @@ def get_backend(path: str) -> ExpenseBackend:
 
 backend = get_backend(str(database_path()))
 inject_canva_unispend_styles()
+st.html(Path(__file__).with_name("transaction_layout.css"))
 
 available_months = backend.get_available_months()
 saved_month = st.session_state.pop("report_month_after_save", None)
@@ -406,22 +408,19 @@ if "student_todos" not in st.session_state:
 h_col1, h_col2 = st.columns([3.5, 1])
 with h_col1:
     st.html("""
-    <div class="canva-navbar" style="margin-bottom: 6px;">
-        <div class="brand-logo">
-            <span style="background: linear-gradient(135deg, #6328E8 0%, #EC4899 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 900;">UTH</span>
-            <span style="font-size: 13px; font-weight: 700; color: #6328E8; background: #EDE9FE; padding: 3px 10px; border-radius: 99px;">Quản lý chi tiêu</span>
-        </div>
-        <div style="font-size: 13px; color: #64748B; font-weight: 500;">
-            Sinh viên Đại học Giao thông Vận tải TP.HCM • Kết nối SQLite3 Backend
+    <div class="unispend-brand">
+        <span class="unispend-brand-mark" aria-hidden="true">U</span>
+        <div>
+            <div class="unispend-brand-name">UniSpend <span>UTH</span></div>
+            <div class="unispend-brand-caption">Sổ thu chi sinh viên</div>
         </div>
     </div>
     """)
 with h_col2:
     selected_month = st.selectbox(
-        "Tháng báo cáo:",
+        "Tháng báo cáo",
         options=available_months,
         key="report_month",
-        label_visibility="collapsed",
     )
 
 y_str, m_str = selected_month.split("-")
@@ -558,14 +557,68 @@ with tab_tong_quan:
 # MÀN HÌNH 2: THU CHI (BỐ CỤC 2 CỘT CHUẨN PAGE 2 CANVA)
 # =============================================================================
 with tab_thu_chi:
-    tc_left, tc_right = st.columns([0.85, 1.65], gap="large")
+    st.html(f"""
+    <div class="transaction-header">
+        <div>
+            <h2>Thu chi</h2>
+            <p>Tháng {m_str}/{y_str} · {len(df_month)} giao dịch</p>
+        </div>
+        <div class="transaction-header-balance">
+            <span>Số dư trong tháng</span>
+            <strong>{format_vnd(balance)}</strong>
+        </div>
+    </div>
+    """)
 
+    with st.expander("Nhập giao dịch từ CSV", icon=":material/upload_file:"):
+        st.caption(
+            "Chọn tệp CSV UTF-8 có các cột Ngày, Loại, Danh mục, Số tiền (VNĐ) "
+            "và Ghi chú (tùy chọn). Bạn cũng có thể dùng tệp CSV đã xuất từ UniSpend."
+        )
+        upload_id = st.session_state.get("transaction_csv_upload_id", 0)
+        uploaded_csv = st.file_uploader("Chọn tệp CSV", type=["csv"], key=f"import_csv_uploader_{upload_id}")
+        if uploaded_csv is not None:
+            try:
+                transactions = read_transactions_csv(uploaded_csv.getvalue())
+            except (ValueError, CsvError) as exc:
+                st.error(f"Không đọc được file CSV: {exc}")
+            else:
+                if not transactions:
+                    st.info("Tệp CSV chưa có giao dịch.")
+                else:
+                    st.info(f"Tìm thấy **{len(transactions)}** giao dịch hợp lệ.")
+                    st.caption("Xem trước tối đa 5 giao dịch")
+                    st.dataframe(
+                        [
+                            {
+                                "Ngày": tx.date,
+                                "Loại": tx.tx_type,
+                                "Danh mục": tx.category,
+                                "Số tiền": format_vnd(tx.amount),
+                                "Ghi chú": tx.note,
+                            }
+                            for tx in transactions[:5]
+                        ],
+                        hide_index=True,
+                        width="stretch",
+                    )
+                    if st.button("✅ Xác nhận nhập vào sổ", type="primary"):
+                        try:
+                            backend.db.insert_transactions(transactions)
+                        except DatabaseError:
+                            st.error("Chưa lưu được giao dịch. Hãy thử lại.")
+                        else:
+                            st.session_state["transaction_csv_upload_id"] = upload_id + 1
+                            st.session_state["report_month_after_save"] = max(tx.month_key for tx in transactions)
+                            st.session_state["csv_import_count"] = len(transactions)
+                            st.rerun()
+
+    if imported := st.session_state.pop("csv_import_count", None):
+        st.success(f"Đã nhập thành công {imported} giao dịch.")
+
+    tc_left, tc_right = st.columns([1, 2], gap="large")
     with tc_left:
-        st.html("""
-        <div class="page-title-navy">Thu chi</div>
-        <div class="page-subtitle">Ghi khoản thu, chi mới vào sổ cá nhân</div>
-        """)
-
+        st.subheader("Thêm giao dịch")
         tx_type_in = st.radio("Loại giao dịch:", ["Chi tiêu", "Thu nhập"], horizontal=True)
         cat_dict = backend.get_categories(tx_type_in)
 
@@ -613,9 +666,9 @@ with tab_thu_chi:
             st.success(f"✅ {saved_notice}")
 
     with tc_right:
-        st.html(f'<div class="canva-card" style="padding: 16px 22px; margin-bottom: 12px;"><div style="font-size:18px; font-weight:800; color:#0B1938;">📊 Sổ nhật ký & Thống kê giao dịch tháng {m_str}/{y_str}</div></div>')
+        st.subheader("Sổ giao dịch")
 
-        f1, f2, f3, f4, f5 = st.columns([0.95, 0.95, 1.2, 0.95, 0.95])
+        f1, f2, f3 = st.columns([1, 1, 1.4])
         with f1:
             f_type = st.selectbox("Lọc loại:", ["Tất cả", "Chi tiêu", "Thu nhập"])
         with f2:
@@ -623,8 +676,7 @@ with tab_thu_chi:
             f_cat = st.selectbox("Lọc danh mục:", cat_opts)
         with f3:
             f_kw = st.text_input("Tìm ghi chú:", placeholder="VD: cơm, xăng, tiền trọ...", key="ledger_search")
-        with f4:
-            st.write("")
+        with st.container():
             df_show = df_month.copy()
             if f_type != "Tất cả":
                 df_show = df_show[df_show["tx_type"] == f_type]
@@ -662,43 +714,12 @@ with tab_thu_chi:
                     mime="text/csv",
                     use_container_width=True
                 )
-        with f5:
-            st.write("")
-            with st.popover("📤 Nhập dữ liệu", use_container_width=True):
-                st.markdown("**Nhập hàng loạt từ file CSV**")
-                st.caption("Hỗ trợ file CSV xuất từ ứng dụng hoặc file có cột: `Ngày giao dịch`, `Loại giao dịch`, `Danh mục`, `Số tiền (VNĐ)`, `Ghi chú chi tiết`.")
-                upload_id = st.session_state.get("transaction_csv_upload_id", 0)
-                uploaded_csv = st.file_uploader("Chọn file CSV:", type=["csv"], key=f"import_csv_uploader_{upload_id}")
-                if uploaded_csv is not None:
-                    try:
-                        transactions = read_transactions_csv(uploaded_csv.getvalue())
-                    except (ValueError, CsvError) as exc:
-                        st.error(f"Không đọc được file CSV: {exc}")
-                    else:
-                        if not transactions:
-                            st.info("Tệp CSV chưa có giao dịch.")
-                        else:
-                            st.info(f"Tìm thấy **{len(transactions)}** giao dịch hợp lệ.")
-                            if st.button("✅ Xác nhận nhập vào sổ", type="primary", use_container_width=True):
-                                try:
-                                    backend.db.insert_transactions(transactions)
-                                except DatabaseError:
-                                    st.error("Chưa lưu được giao dịch. Hãy thử lại.")
-                                else:
-                                    st.session_state["transaction_csv_upload_id"] = upload_id + 1
-                                    st.session_state["report_month_after_save"] = max(tx.month_key for tx in transactions)
-                                    st.session_state["csv_import_count"] = len(transactions)
-                                    st.rerun()
-
-        if imported := st.session_state.pop("csv_import_count", None):
-            st.success(f"Đã nhập thành công {imported} giao dịch.")
-
         if not df_show.empty:
             sum_thu = float(df_show[df_show["tx_type"] == "Thu nhập"]["amount"].sum())
             sum_chi = float(df_show[df_show["tx_type"] == "Chi tiêu"]["amount"].sum())
             sum_diff = sum_thu - sum_chi
             st.html(f"""
-            <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:10px; margin:8px 0 12px 0;">
+            <div class="transaction-totals">
                 <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:14px; padding:10px 14px;">
                     <div style="font-size:11px; color:#64748B; font-weight:600;">Số dòng hiển thị</div>
                     <div style="font-size:17px; font-weight:800; color:#0B1938;">{len(df_show)} khoản</div>
